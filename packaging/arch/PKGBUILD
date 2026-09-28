@@ -1,0 +1,133 @@
+# Maintainer: GoProSlowYo <68455785+goproslowyo@users.noreply.github.com>
+#
+# Based on the Arch Linux open-vm-tools 6:13.1.0-3 PKGBUILD,
+# https://gitlab.archlinux.org/archlinux/packaging/packages/open-vm-tools
+# commit a2334c0c598a9efdc14f9bdf62aa827e19135d84, by Sergej Pupykin and
+# Krzysztof Raczkowski. The changes add the ovt-wayland patches, build the
+# GTK4 plugin with --with-wayland, and rename the package so it can replace
+# the repository one.
+#
+# packaging/arch/prepare.sh copies this file, the files it needs and the
+# patches from patches/ into one directory for makepkg. build.sh does that
+# and runs makepkg in an archlinux container.
+
+pkgname=open-vm-tools-wayland
+_pkgname=open-vm-tools
+epoch=6
+pkgver=13.1.0
+pkgrel=1
+pkgdesc='Open Virtual Machine Tools with Wayland copy and paste and drag and drop'
+arch=('x86_64')
+url='https://github.com/goproslowyo/ovt-wayland'
+license=('LGPL-2.1-only')
+depends=('fuse3' 'icu' 'iproute2' 'libdnet' 'libmspack' 'libsigc++-3.0'
+         'libxss' 'lsb-release' 'procps-ng'
+         'uriparser' 'which' 'xmlsec'
+         'gtkmm-4.0' 'libxtst' 'wayland')
+makedepends=('git' 'chrpath' 'doxygen' 'python' 'rpcsvc-proto' 'glib2-devel'
+             'wayland-protocols')
+checkdepends=('cunit')
+optdepends=('netctl: suspend-resume network state'
+            'networkmanager: suspend-resume network state'
+            'wl-clipboard: clipboard fallback for compositors without data control')
+provides=("${_pkgname}=${epoch}:${pkgver}")
+conflicts=("${_pkgname}")
+backup=('etc/pam.d/vmtoolsd'
+        'etc/vmware-tools/vgauth.conf'
+        'etc/xdg/autostart/vmware-user.desktop')
+options=('docs')
+
+# Keep in the order of patches/. prepare.sh checks that this list matches.
+_patches=(
+        '0001-dndcp-validate-host-input.patch'
+        '0002-dndcp-any-desktop-file-drop.patch'
+        '0003-dndcp-fake-pointer.patch'
+        '0004-dndcp-drag-read-uri-list.patch'
+        '0005-dndcp-wayland-configure.patch'
+        '0006-dndcp-data-control-client.patch'
+        '0007-dndcp-wayland-paste-from-host.patch'
+        '0008-dndcp-wayland-copy-to-host.patch'
+        '0009-dndcp-wl-clipboard-fallback.patch'
+        '0010-dndcp-gnome-xselection-clipboard.patch'
+        '0011-dndcp-wayland-file-copy.patch'
+        '0012-dndcp-wayland-file-paste.patch'
+        '0013-dndcp-wayland-xdnd.patch'
+        '0014-dndcp-native-drag-overlay.patch'
+        '0015-dndcp-native-drag-start.patch'
+        '0016-dndcp-native-drag-host-to-guest.patch'
+        '0017-dndcp-native-drag-placeholders.patch'
+        '0018-dndcp-native-drag-accept.patch'
+        '0019-dndcp-gnome-drag-host-to-guest.patch'
+        '0020-dndcp-gnome-drag-guest-to-host.patch'
+        '0021-dndcp-native-drop-target.patch'
+        '0022-dndcp-staging-cleanup.patch'
+)
+source=("git+https://github.com/vmware/open-vm-tools#tag=stable-${pkgver}"
+        'vmtoolsd.pam'
+        'vmtoolsd.service'
+        'vmware-vmblock-fuse.service'
+        'open-vm-tools-gcc16.patch'
+        'open-vm-tools-sigc++3.patch'
+        "${_patches[@]}")
+sha256sums=('916a09225a22653ec5e56b1df5bbfacc7f69b2b9e8ac734052936bcb75cde49a'
+            '9848f4b621bb1134e463fea099f03933cf3f48f1ac5e580228abef264d26137e'
+            '0626cc86232f75a7286c24c52d6b44260bba55e2e96c17fa22ed36decb61a4d9'
+            '99e3cc1da20a751049144cc02dec77174a55109b5b5960e1facd78709da7724f'
+            '2c3b3fa378c86307223b9977c6b07ec1781d5b396c1526ee7fef73b7604a0c6d'
+            '737d721dcd19d5d48ae35a80c04a9b3ce6531ecdb41c00904f1b5d687855901e'
+            # Our patches come from this repository, so makepkg does not check them.
+            "${_patches[@]/*/SKIP}")
+
+prepare() {
+  cd "${srcdir}/${_pkgname}/open-vm-tools/"
+  patch -Np1 -i ../../open-vm-tools-gcc16.patch
+  # From Fedora's 13.1.0 package. The GTK4 plugin links gtkmm-4.0, which
+  # uses libsigc++ 3, and 3.x removed the signal<R, T...> syntax upstream's
+  # dndcp headers still use.
+  patch -Np1 -i ../../open-vm-tools-sigc++3.patch
+  local p
+  for p in "${_patches[@]}"; do
+    echo "applying ${p}"
+    patch -Np1 -i "${srcdir}/${p}"
+  done
+  autoreconf -vi
+}
+
+build() {
+  cd "${srcdir}/${_pkgname}/open-vm-tools/"
+
+  # --with-wayland makes configure fail instead of building the plugin
+  # without its Wayland backend when a dependency is missing.
+  sh ./configure \
+    --prefix=/usr \
+    --sbindir=/usr/bin \
+    --sysconfdir=/etc \
+    --with-udev-rules-dir=/usr/lib/udev/rules.d \
+    --with-gtk4 \
+    --with-wayland \
+    --without-kernel-modules
+  make
+}
+
+check() {
+  cd "${srcdir}/${_pkgname}/open-vm-tools/"
+
+  make check
+}
+
+package() {
+  cd "${srcdir}/${_pkgname}/open-vm-tools/"
+
+  make install DESTDIR="${pkgdir}"
+  chmod 7755 "${pkgdir}"/usr/bin/vmware-user-suid-wrapper
+
+  # install vmware-xdg-detect-de
+  install -D -m0755 scripts/common/vmware-xdg-detect-de "${pkgdir}"/usr/bin/vmware-xdg-detect-de
+
+  # install pam configuration
+  install -D -m0644 "${srcdir}"/vmtoolsd.pam "${pkgdir}"/etc/pam.d/vmtoolsd
+
+  # install systemd files
+  install -D -m0644 "${srcdir}"/vmtoolsd.service "${pkgdir}"/usr/lib/systemd/system/vmtoolsd.service
+  install -D -m0644 "${srcdir}"/vmware-vmblock-fuse.service "${pkgdir}"/usr/lib/systemd/system/vmware-vmblock-fuse.service
+}
