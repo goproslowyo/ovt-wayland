@@ -1,0 +1,51 @@
+Description: Fix build with openssl 4.0
+ Add required const qualifiers to certverify.c
+Author: Yaakov Selkowitz <yselkowi@redhat.com>
+Origin: backport, https://src.fedoraproject.org/fork/yselkowitz/rpms/open-vm-tools/c/691a6cfe0849f925a278023b068164628dec3079
+Bug: https://github.com/vmware/open-vm-tools/issues/794
+Bug-Debian: https://bugs.debian.org/1138384
+Bug-Ubuntu: https://bugs.launchpad.net/bugs/2154932
+Reviewed-by: Renan Rodrigo <rr@ubuntu.com>
+Last-Update: 2026-08-07
+X-ovt-wayland: Copied unchanged from Ubuntu open-vm-tools 2:13.0.10-1ubuntu6.
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+diff --git a/vgauth/common/certverify.c b/vgauth/common/certverify.c
+index 845f59b..ec5faf7 100644
+--- a/open-vm-tools/vgauth/common/certverify.c
++++ b/open-vm-tools/vgauth/common/certverify.c
+@@ -793,7 +793,7 @@ CertVerify_CheckSignatureUsingCert(VGAuthHashAlg hash,
+ {
+    VGAuthError err;
+    X509 *cert;
+-   X509_PUBKEY *x509PubKey;
++   const X509_PUBKEY *x509PubKey;
+    EVP_PKEY *publicKey;
+ 
+    cert = CertStringToX509(pemCert);
+@@ -924,12 +924,12 @@ done:
+ 
+ static X509 *
+ FindCert(GList *cList,
+-         X509_NAME *val,
++         const X509_NAME *val,
+          int checkSubj)
+ {
+    GList *l;
+    X509 *c;
+-   X509_NAME *v;
++   const X509_NAME *v;
+ 
+    l = cList;
+    while (l != NULL) {
+@@ -974,8 +974,8 @@ CertVerify_CheckForUnrelatedCerts(int numCerts,
+    GList *rawList = NULL;
+    X509 *baseCert;
+    X509 *curCert;
+-   X509_NAME *subject;
+-   X509_NAME *issuer;
++   const X509_NAME *subject;
++   const X509_NAME *issuer;
+ 
+    /* common single cert case; nothing to do */
+    if (numCerts == 1) {

@@ -1,0 +1,79 @@
+# open-vm-tools 13.1.0 .debs for Debian and Ubuntu, with the Wayland patches.
+#
+# Debian and Ubuntu ship 13.0.10 or older, and the patches in patches/
+# target 13.1.0. This builder takes the upstream 13.1.0 release tarball and
+# Debian's newest packaging, applies Debian's patches and ours, and builds
+# the binary packages into /debs. Build from the repository root:
+#
+#   podman build -f builders/debian-deb/Containerfile \
+#       --build-arg BASE=ubuntu:24.04 --output type=local,dest=out .
+#
+# BASE is a Docker Hub library image. Tested with debian:trixie (13),
+# debian:testing, debian:unstable, ubuntu:24.04 and ubuntu:26.04.
+# ubuntu:devel (26.10) fails until it has gtkmm 4.24, see README.md.
+#
+# Every download is checked against a SHA-256 pinned below, and the build
+# stops if a patch fails to apply or the plugin lacks a patched log string.
+# build.sh does the work, and README.md next to this file explains the
+# choices.
+
+ARG BASE=debian:testing
+
+FROM docker.io/library/${BASE} AS build
+
+# Upstream release tarball. The build number is part of the file name.
+ARG OVT_VERSION=13.1.0
+ARG OVT_BUILD=25218885
+ARG OVT_SHA256=67a23d505aca77127b081445f758e269b1009e8824cf7f6f2d6efafb0b14d0fd
+
+# Debian packaging. Only the debian/ tarball is used. The snapshot timestamp
+# is when this upload reached the archive, so the URL stays valid after
+# Debian replaces the package.
+ARG DEBIAN_PKG_VERSION=13.0.10-1.1
+ARG DEBIAN_SNAPSHOT=20260827T082435Z
+ARG DEBIAN_TAR_SHA256=1e72892c43ebd207b397787dbab6730af96cd418780f5450974c3200676fa711
+
+# The package revision becomes 100ovtwayland<PKG_REV>~<DISTRO_TAG>. An empty
+# DISTRO_TAG is derived from /etc/os-release, e.g. ubuntu24.04 or
+# debian.forky. Debian testing and sid report the same codename, so pass
+# DISTRO_TAG=debian.sid for sid.
+ARG PKG_REV=1
+ARG DISTRO_TAG=
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LC_ALL=C.UTF-8
+
+COPY builders/debian-deb/build.sh /usr/local/bin/ovt-deb-build
+
+RUN ovt-deb-build apt update \
+    && ovt-deb-build apt install -y --no-install-recommends \
+        ca-certificates curl xz-utils dpkg-dev binutils \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY builders/debian-deb/patches/ /debian-patches/
+COPY patches/ /patches/
+
+# One step, with the work tree on a tmpfs, and the build dependencies purged
+# at the end. They take several GB, mostly Go sources for the containerinfo
+# plugin, and a layer holding them would need that space twice on commit.
+RUN --mount=type=tmpfs,target=/build \
+    set -eux; \
+    cd /build; \
+    ovt-deb-build fetch; \
+    ovt-deb-build prepare; \
+    dpkg-query -W -f '${Package}\n' | sort > /tmp/pkgs.before; \
+    ovt-deb-build apt update; \
+    ovt-deb-build apt build-dep -y --no-install-recommends \
+        "./open-vm-tools-${OVT_VERSION}"; \
+    ovt-deb-build build; \
+    ovt-deb-build check; \
+    dpkg-query -W -f '${Package}\n' | sort > /tmp/pkgs.after; \
+    comm -13 /tmp/pkgs.before /tmp/pkgs.after | xargs apt-mark auto > /dev/null; \
+    apt-get autoremove -y --purge > /dev/null; \
+    rm -rf /var/lib/apt/lists/* /tmp/pkgs.*
+
+# Only the packages. Export them with
+#   podman build ... --output type=local,dest=out
+# which writes out/debs/*.deb, or copy /debs from this stage.
+FROM scratch
+COPY --from=build /debs /debs
