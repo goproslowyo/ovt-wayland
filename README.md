@@ -1,9 +1,11 @@
-# bazzite-ovt
+# ovt-wayland
 
-Bazzite with `open-vm-tools` 13.1.0 rebuilt so that copy and paste and drag
-and drop work in a VMware guest under Wayland, in both directions, for every
-format the protocol defines. Those are text, RTF, PNG images, files and file
-contents.
+`open-vm-tools` 13.1.0 rebuilt so that copy and paste and drag and drop work
+in a VMware guest under Wayland, in both directions, for every format the
+protocol defines. Those are text, RTF, PNG images, files and file contents.
+It comes as RPMs for Fedora 43, 44 and 45, .debs for Debian and Ubuntu, an
+Arch Linux package, and bootc images based on Bazzite and Fedora COSMIC
+Atomic.
 
 Stock `open-vm-tools` has only an X11 copy and paste backend. Under Wayland it
 can reach only Xwayland's clipboard, and most compositors refuse clipboard
@@ -251,12 +253,15 @@ X11 sessions as well.
 
 ### Using the patches elsewhere
 
-Only the packaging is specific to Bazzite. The patches build into any
-open-vm-tools 13.1.0 and need the following.
+Only `builders/`, `images/` and `packaging/` are specific to a distribution. The patches
+build into any open-vm-tools 13.1.0 and need the following.
 
 - A GTK4 build (`--with-gtk4`) for drag and drop, which lives in
   `dndUIX11GTK4.cpp` and `dragDetWndX11GTK4.cpp`. The Wayland clipboard
   backend also compiles against GTK3, but only GTK4 builds were tested.
+  Upstream's GTK4 code uses the `signal<R, T...>` syntax that newer
+  libsigc++ 3 releases removed. Fedora's package carries
+  `open-vm-tools-sigc++3.patch` for it, and the Arch package reuses it.
 - `wayland-client`, `wayland-scanner` and `wayland-protocols` 1.39 or later,
   found through pkg-config. The build generates the protocol code from their
   XML and from the vendored `wlr-layer-shell` XML. Configure turns Wayland
@@ -265,65 +270,235 @@ open-vm-tools 13.1.0 and need the following.
 - `ext-data-control-v1` in the compositor for the full clipboard, and
   `zwlr_layer_shell_v1` plus the uinput descriptor for the native drag source.
 
+## Images and packages
+
+Each build produces these. `targets.json` lists them, and CI builds from it.
+
+| Target | Built from | Where |
+|---|---|---|
+| Bazzite image | `ghcr.io/ublue-os/bazzite:stable`, Fedora 44 RPMs | `ghcr.io/goproslowyo/bazzite-ovt`, tags `latest` and `YYYYMMDD` |
+| Fedora COSMIC Atomic image | `quay.io/fedora-ostree-desktops/cosmic-atomic:45`, Fedora 45 RPMs | `ghcr.io/goproslowyo/fedora-cosmic-ovt`, tags `latest`, `45` and `YYYYMMDD` |
+| RPMs for Fedora 43, 44 and 45 | Fedora's `open-vm-tools` source rpm for that release | [Releases](https://github.com/goproslowyo/ovt-wayland/releases) |
+| .debs for Debian 13, testing and sid, and Ubuntu 24.04 and 26.04 | upstream 13.1.0 source with Debian's packaging | [Releases](https://github.com/goproslowyo/ovt-wayland/releases) |
+| Arch Linux package `open-vm-tools-wayland` | upstream 13.1.0 source with Arch's PKGBUILD | [Releases](https://github.com/goproslowyo/ovt-wayland/releases) |
+
+Packages are published only as GitHub release assets. There is no dnf
+repository. Each release is tagged `v<version>-<YYYYMMDD>` and carries, for
+each Fedora release and each Debian or Ubuntu target, `open-vm-tools` and
+`open-vm-tools-desktop`, the two packages the patches change. It also has the
+patched source rpm for each Fedora release, the Arch package and a
+`SHA256SUMS` file. The builders produce the other subpackages too, such as
+`-devel` and `-sdmp`, but they are unchanged rebuilds and are not published.
+Build them from this repository if you need them. The RPMs have release `100.fcNN.clipway`, for example
+`open-vm-tools-13.1.0-100.fc44.clipway.x86_64.rpm`, so the files for
+different Fedora releases have different names. Release 100 sorts above
+Fedora's own build of 13.1.0, so dnf and rpm-ostree treat it as an upgrade.
+
 ## Install
 
-Switch to the image and reboot.
+### Bootc images
+
+Switch to the image for your desktop and reboot.
 
 ```bash
 sudo bootc switch ghcr.io/goproslowyo/bazzite-ovt:latest
+# or
+sudo bootc switch ghcr.io/goproslowyo/fedora-cosmic-ovt:latest
 systemctl reboot
 ```
 
 After that, `sudo bootc upgrade` and a reboot pick up new builds. To roll
-back, run `sudo rpm-ostree rollback`, or `bootc switch` back to
-`ghcr.io/ublue-os/bazzite:stable`. If you have a local
+back, run `sudo bootc rollback`, or `bootc switch` back to the base image,
+`ghcr.io/ublue-os/bazzite:stable` or
+`quay.io/fedora-ostree-desktops/cosmic-atomic:45`. If you have a local
 `rpm-ostree override replace` of open-vm-tools, remove it first with
 `sudo rpm-ostree override reset open-vm-tools open-vm-tools-desktop`.
-Customise the image in the Containerfile. With local `rpm-ostree install`
-changes, `bootc upgrade` refuses to run until `rpm-ostree reset`.
+Customise the image in its Containerfile under `images/`. With local
+`rpm-ostree install` changes, `bootc upgrade` refuses to run until
+`rpm-ostree reset`.
+
+The Fedora COSMIC image also enables `vmtoolsd.service` and
+`run-vmblock\x2dfuse.mount`.
+
+### RPMs on Fedora
+
+Download `open-vm-tools` and `open-vm-tools-desktop` for your Fedora release
+from the [latest release](https://github.com/goproslowyo/ovt-wayland/releases/latest). The other `open-vm-tools` subpackages, such as
+`open-vm-tools-sdmp`, require the same version as `open-vm-tools` and are not
+in the release. If you have one installed, remove it first or build it from
+this repository.
+
+```bash
+rel=$(rpm -E %fedora)
+base=https://github.com/goproslowyo/ovt-wayland/releases/latest/download
+curl -LO "$base/open-vm-tools-13.1.0-100.fc$rel.clipway.x86_64.rpm"
+curl -LO "$base/open-vm-tools-desktop-13.1.0-100.fc$rel.clipway.x86_64.rpm"
+curl -LO "$base/SHA256SUMS"
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+On an atomic desktop such as Silverblue, Kinoite or Bazzite, replace the
+base image's packages and reboot.
+
+```bash
+sudo rpm-ostree override replace \
+    ./open-vm-tools-13.1.0-100.fc$rel.clipway.x86_64.rpm \
+    ./open-vm-tools-desktop-13.1.0-100.fc$rel.clipway.x86_64.rpm
+systemctl reboot
+```
+
+`sudo rpm-ostree override reset open-vm-tools open-vm-tools-desktop` undoes
+it.
+
+On Fedora Workstation and other dnf systems, install them over the stock
+packages, restart the service and log out and back in.
+
+```bash
+sudo dnf install \
+    ./open-vm-tools-13.1.0-100.fc$rel.clipway.x86_64.rpm \
+    ./open-vm-tools-desktop-13.1.0-100.fc$rel.clipway.x86_64.rpm
+sudo systemctl restart vmtoolsd
+```
+
+If Fedora later ships a newer `open-vm-tools` version, a normal update
+replaces this build with it. `sudo dnf distro-sync open-vm-tools
+open-vm-tools-desktop` goes back to Fedora's build.
+
+### Debs on Debian and Ubuntu
+
+Download the `open-vm-tools` and `open-vm-tools-desktop` .debs for your
+release from the latest release and install them with
+`sudo apt install ./open-vm-tools_*.deb ./open-vm-tools-desktop_*.deb`.
+[builders/debian-deb/README.md](builders/debian-deb/README.md) has the full
+steps.
+
+### Arch Linux
+
+Download `open-vm-tools-wayland-*-x86_64.pkg.tar.zst` from the latest
+release and install it. It replaces `open-vm-tools`; answer yes when pacman
+asks to remove it.
+
+    sudo pacman -U ./open-vm-tools-wayland-*-x86_64.pkg.tar.zst
+    sudo systemctl enable --now vmtoolsd.service vmware-vmblock-fuse.service
+
+Log out and back in so `vmtoolsd -n vmusr` starts with the new plugin.
+`vmware-vmblock-fuse.service` mounts `/run/vmblock-fuse`, which file paste
+and host to guest file drags need. pacman does not upgrade the package from
+the Arch repositories, so install each new release the same way. To go back,
+run `sudo pacman -S open-vm-tools`.
+[packaging/arch/README.md](packaging/arch/README.md) explains how the
+package is built.
 
 ### Verifying signatures
 
 CI signs each image with cosign. The image installs `cosign.pub` as
-`/etc/pki/containers/bazzite-ovt.pub`, adds a `sigstoreSigned` policy for its
-repository to `/etc/containers/policy.json`, and enables sigstore attachments
-in `/etc/containers/registries.d/bazzite-ovt.yaml`. Because the policy ships
-inside the image, boot the unsigned reference once, then switch to the signed
-one.
+`/etc/pki/containers/<image>.pub`, adds a `sigstoreSigned` policy for its
+repository to the containers policy, and enables sigstore attachments in
+`/etc/containers/registries.d/<image>.yaml`, where `<image>` is `bazzite-ovt`
+or `fedora-cosmic-ovt`. Bazzite keeps its policy in
+`/etc/containers/policy.json`, and Fedora 45 in
+`/usr/share/containers/policy.json`.
+
+A machine that has its own `/etc/containers/policy.json`, for example one
+upgraded from Fedora 44 or edited by hand, reads only that file, so the
+policy in the COSMIC image does not apply there. Check with
+`grep fedora-cosmic-ovt /etc/containers/policy.json`; if the file exists and
+the image is missing from it, copy the entry from
+`/usr/share/containers/policy.json` or remove the local file.
+
+Because the policy ships inside the image, the first switch from the base
+image cannot check the signature. Once the machine runs the image, every
+`bootc upgrade` and `bootc switch` to its repository pulls through that
+policy, and a build without a valid signature is refused.
+
+Bazzite's policy has `reject` as its top-level default, so there you can also
+pass `--enforce-container-sigpolicy`, which makes bootc check that the policy
+requires signatures before it pulls.
 
 ```bash
-sudo bootc switch ostree-image-signed:docker://ghcr.io/goproslowyo/bazzite-ovt:latest
-systemctl reboot
+sudo bootc switch --enforce-container-sigpolicy ghcr.io/goproslowyo/bazzite-ovt:latest
 ```
+
+Fedora's policy accepts anything by default, and
+`--enforce-container-sigpolicy` refuses such a policy, so on the COSMIC image
+use plain `bootc switch` and `bootc upgrade`. The repository entry still
+applies to them. The `ostree-image-signed:docker://` form is for
+`rpm-ostree rebase`. `bootc switch` takes a plain image reference.
 
 ## Building
 
 CI builds on every push to `main` that changes more than Markdown files or
-`LICENSE`, every Monday at 07:00 UTC, and on manual dispatch. Only a run on
-`main` pushes `latest` and a `YYYYMMDD` tag, signs the pushed digest, and
-fails if `cosign verify` against `cosign.pub` does not pass.
+`LICENSE`, every Monday at 07:00 UTC, and on manual dispatch. It reads
+`targets.json`, builds the RPMs for each Fedora release in it, the .debs for
+each Debian and Ubuntu target and the Arch package, uploads them as workflow
+artifacts named `pkg-rpm-fcNN`, `pkg-deb-<name>` and `pkg-arch`, and builds
+each image from its release's RPMs. Only a run on `main` pushes the images
+with their tags, signs each pushed digest, fails if `cosign verify` against
+`cosign.pub` does not pass, and creates or updates the GitHub release for that
+day. The release job attaches the files of every artifact whose name starts
+with `pkg-`, turns `~` in file names into `.` as GitHub would, and fails if
+two files end up with the same name. A target that fails does not hold back
+the rest. The release goes out with the packages that built, and its notes say
+which kinds are missing. A second run on the same day replaces that day's
+assets and removes any it did not build.
 
-To build locally:
+The build is split in two. `builders/fedora-rpm/Containerfile` rebuilds
+Fedora's source rpm with the patches for the release in `FEDORA_RELEASE`.
+Each `images/<name>/Containerfile` takes those RPMs from a build context named
+`rpms` and layers them onto its base. `build.sh` runs both steps locally from
+`targets.json`.
 
 ```bash
-podman build --build-arg SIGNED_REPO=ghcr.io/<you>/bazzite-ovt \
+./build.sh rpms 44                 # RPMs into out/fc44/rpms
+SIGNED_REPO=ghcr.io/<you>/bazzite-ovt ./build.sh image bazzite
+```
+
+`build.sh image` rebuilds the RPMs for the image's release first, and
+tags the result `localhost/<image>:<tag>` for each tag in `targets.json`. Run
+it with `sudo` to build into the store that `bootc switch --transport
+containers-storage` reads. By hand, the same steps are these.
+
+```bash
+podman build -f builders/fedora-rpm/Containerfile \
+    --build-arg FEDORA_RELEASE=44 -o out/fc44 .
+podman build -f images/bazzite/Containerfile \
+    --build-context rpms=out/fc44/rpms \
+    --build-arg SIGNED_REPO=ghcr.io/<you>/bazzite-ovt \
     -t ghcr.io/<you>/bazzite-ovt:latest .
 ```
 
 `SIGNED_REPO` names the repository the image's signature policy covers and
-defaults to `ghcr.io/goproslowyo/bazzite-ovt`. To sign in a fork, run
-`COSIGN_PASSWORD="" cosign generate-key-pair`, add `cosign.key` as the
-`SIGNING_SECRET` repository secret, and commit `cosign.pub`. Never commit
+defaults to the image's repository under `ghcr.io/goproslowyo`. To sign in a
+fork, run `COSIGN_PASSWORD="" cosign generate-key-pair`, add `cosign.key` as
+the `SIGNING_SECRET` repository secret, and commit `cosign.pub`. Never commit
 `cosign.key`.
 
 The build fails rather than ship an unpatched binary. It checks the source
 rpm against Fedora's release key, pins `OVT_VERSION` and stops if Fedora ships
 another version, and greps the built `libdndcp.so` for at least one log
-string from each patch.
+string from each patch. Each image checks that its RPMs come from the same
+Fedora release as its base.
 
 To add a patch, put it in `patches/` named `NNNN-<name>.patch` with `<name>`
-in `[A-Za-z0-9._-]`. The Containerfile registers every patch there in sorted
-order as `Patch101` onward, after Fedora's own.
+in `[A-Za-z0-9._-]`. The builder registers every patch there in sorted order
+as `Patch101` onward, after Fedora's own.
+
+### Adding an image
+
+1. Copy `images/fedora-cosmic` to `images/<name>` and change the base image,
+   the `SIGNED_REPO` default, and the key and `registries.d` file names.
+   Keep the release check, and install only `open-vm-tools` and
+   `open-vm-tools-desktop` from `/tmp/rpms`.
+2. Add an entry to `images` in `targets.json` with `name`, `image` (the ghcr
+   repository name), `containerfile`, `base`, `fedora_release` and `tags`.
+   `fedora_release` must also appear under `rpms`. Add it there if it is a
+   new release.
+3. Build it with `./build.sh image <name>` and check it with
+   `bootc container lint`.
+
+CI builds and pushes the new image on the next run on `main`. GitHub creates
+the ghcr package on that first push as private, so make it public in the
+package settings for `bootc switch` to pull it without logging in.
 
 ## Debugging
 
