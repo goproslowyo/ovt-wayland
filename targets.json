@@ -1,0 +1,63 @@
+{
+  "rpms": [
+    {
+      "fedora_release": 43
+    },
+    {
+      "fedora_release": 44
+    },
+    {
+      "fedora_release": 45
+    }
+  ],
+  "debs": [
+    {
+      "name": "debian-13",
+      "base": "debian:trixie",
+      "distro_tag": ""
+    },
+    {
+      "name": "debian-testing",
+      "base": "debian:testing",
+      "distro_tag": ""
+    },
+    {
+      "name": "debian-sid",
+      "base": "debian:unstable",
+      "distro_tag": "debian.sid"
+    },
+    {
+      "name": "ubuntu-24.04",
+      "base": "ubuntu:24.04",
+      "distro_tag": ""
+    },
+    {
+      "name": "ubuntu-26.04",
+      "base": "ubuntu:26.04",
+      "distro_tag": ""
+    }
+  ],
+  "images": [
+    {
+      "name": "bazzite",
+      "image": "bazzite-ovt",
+      "containerfile": "images/bazzite/Containerfile",
+      "base": "ghcr.io/ublue-os/bazzite:stable",
+      "fedora_release": 44,
+      "tags": [
+        "latest"
+      ]
+    },
+    {
+      "name": "fedora-cosmic",
+      "image": "fedora-cosmic-ovt",
+      "containerfile": "images/fedora-cosmic/Containerfile",
+      "base": "quay.io/fedora-ostree-desktops/cosmic-atomic:45",
+      "fedora_release": 45,
+      "tags": [
+        "latest",
+        "45"
+      ]
+    }
+  ]
+}

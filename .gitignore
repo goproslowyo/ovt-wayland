@@ -2,3 +2,4 @@
 *.src.rpm
 rpmbuild/
 cosign.key
+out/

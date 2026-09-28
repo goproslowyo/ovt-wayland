@@ -1,0 +1,71 @@
+# Bazzite with open-vm-tools rebuilt for Wayland copy and paste and drag and
+# drop.
+#
+# The RPMs come from builders/fedora-rpm, passed in as the build context named
+# rpms. Build from the repository root.
+#
+#   podman build -f builders/fedora-rpm/Containerfile \
+#       --build-arg FEDORA_RELEASE=44 -o out/fc44 .
+#   podman build -f images/bazzite/Containerfile \
+#       --build-context rpms=out/fc44/rpms -t bazzite-ovt .
+#
+# build.sh at the repository root runs both steps for any image in
+# targets.json.
+
+ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
+
+FROM ${BASE_IMAGE}
+ARG SIGNED_REPO=ghcr.io/goproslowyo/bazzite-ovt
+
+COPY --from=rpms open-vm-tools-[0-9]*.x86_64.rpm open-vm-tools-desktop-[0-9]*.x86_64.rpm /tmp/rpms/
+
+# The RPMs must come from the same Fedora release as the base. If Bazzite
+# moves to a new release, update fedora_release for this image in
+# targets.json.
+RUN set -eux; \
+    dist="$(rpm -E '%{?dist}')"; \
+    for f in /tmp/rpms/*.rpm; do \
+        case "$f" in \
+            *"${dist}.clipway.x86_64.rpm") ;; \
+            *) echo "ERROR: $f does not match the base image's ${dist}" >&2; exit 1 ;; \
+        esac; \
+    done
+
+RUN set -eux; \
+    rpm-ostree override replace \
+        /tmp/rpms/open-vm-tools-[0-9]*.rpm \
+        /tmp/rpms/open-vm-tools-desktop-[0-9]*.rpm; \
+    rm -rf /tmp/rpms
+
+# Signature verification for this image's own repo.
+#
+# The stock policy only verifies ghcr.io/ublue-os and some Red Hat sources, so
+# without this an ostree-image-signed reference to our repo is refused. Note
+# the bootstrap order. The policy lives inside the image, so a machine has to
+# run the unsigned image once before it can switch to the signed reference.
+COPY cosign.pub /etc/pki/containers/bazzite-ovt.pub
+
+RUN set -eux; \
+    policy=/etc/containers/policy.json; \
+    test -f "$policy"; \
+    tmp="$(mktemp)"; \
+    jq --arg repo "${SIGNED_REPO}" \
+       --arg key "/etc/pki/containers/bazzite-ovt.pub" \
+       '.transports.docker[$repo] = [{ \
+            "type": "sigstoreSigned", \
+            "keyPath": $key, \
+            "signedIdentity": { "type": "matchRepository" } \
+        }]' "$policy" > "$tmp"; \
+    cat "$tmp" > "$policy"; \
+    rm -f "$tmp"; \
+    jq -e --arg repo "${SIGNED_REPO}" '.transports.docker[$repo][0].keyPath' "$policy"
+
+# Tell the containers stack to look for cosign-style signature attachments on
+# this repo; without it the policy above has nothing to find.
+RUN set -eux; \
+    mkdir -p /etc/containers/registries.d; \
+    printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' \
+        "${SIGNED_REPO}" > /etc/containers/registries.d/bazzite-ovt.yaml; \
+    cat /etc/containers/registries.d/bazzite-ovt.yaml
+
+RUN ostree container commit

@@ -1,0 +1,87 @@
+# Fedora COSMIC Atomic with open-vm-tools rebuilt for Wayland copy and paste
+# and drag and drop.
+#
+# The RPMs come from builders/fedora-rpm, passed in as the build context named
+# rpms. Build from the repository root.
+#
+#   podman build -f builders/fedora-rpm/Containerfile \
+#       --build-arg FEDORA_RELEASE=45 -o out/fc45 .
+#   podman build -f images/fedora-cosmic/Containerfile \
+#       --build-context rpms=out/fc45/rpms -t fedora-cosmic-ovt:45 .
+#
+# build.sh at the repository root runs both steps for any image in
+# targets.json.
+
+ARG BASE_IMAGE=quay.io/fedora-ostree-desktops/cosmic-atomic:45
+
+FROM ${BASE_IMAGE}
+ARG SIGNED_REPO=ghcr.io/goproslowyo/fedora-cosmic-ovt
+
+COPY --from=rpms open-vm-tools-[0-9]*.x86_64.rpm open-vm-tools-desktop-[0-9]*.x86_64.rpm /tmp/rpms/
+
+# The RPMs must come from the same Fedora release as the base.
+RUN set -eux; \
+    dist="$(rpm -E '%{?dist}')"; \
+    for f in /tmp/rpms/*.rpm; do \
+        case "$f" in \
+            *"${dist}.clipway.x86_64.rpm") ;; \
+            *) echo "ERROR: $f does not match the base image's ${dist}" >&2; exit 1 ;; \
+        esac; \
+    done
+
+# The base image can lag behind the Fedora repositories, and the RPMs link
+# against the libraries in the repositories. On Fedora 45 the base had
+# libxml2.so.2 while the repositories had moved to libxml2.so.16, so bring the
+# base up to date first. The kernel stays as the base built it, with its
+# initramfs, since a kernel update here would need a new one. Installing the
+# RPMs then replaces the stock open-vm-tools and open-vm-tools-desktop, since
+# release 100 sorts above Fedora's. The upgrade leaves dnf's state and log in
+# /var, grub files in /boot and an empty /var/lib/containers, none of which
+# the base has, and bootc container lint flags each, so remove them.
+RUN set -eux; \
+    dnf upgrade -y --exclude='kernel*'; \
+    dnf install -y \
+        /tmp/rpms/open-vm-tools-[0-9]*.rpm \
+        /tmp/rpms/open-vm-tools-desktop-[0-9]*.rpm; \
+    dnf clean all; \
+    rm -rf /tmp/rpms /var/lib/dnf /var/log/dnf5.log /boot/grub2 /var/lib/containers; \
+    for p in open-vm-tools open-vm-tools-desktop; do \
+        r="$(rpm -q --qf '%{RELEASE}' "$p")"; \
+        echo "$p $r"; \
+        case "$r" in *.clipway) ;; *) echo "ERROR: $p was not replaced" >&2; exit 1 ;; esac; \
+    done
+
+# vmtoolsd runs the host side services. The vmblock mount carries lazy file
+# paste and host to guest file drags, and Fedora ships it disabled.
+RUN systemctl enable vmtoolsd.service 'run-vmblock\x2dfuse.mount'
+
+# Signature verification for this image's own repo, as in images/bazzite.
+# Fedora 45 ships the default policy in /usr/share/containers and no copy in
+# /etc, so edit whichever file the base uses.
+COPY cosign.pub /etc/pki/containers/fedora-cosmic-ovt.pub
+
+RUN set -eux; \
+    policy=/etc/containers/policy.json; \
+    test -f "$policy" || policy=/usr/share/containers/policy.json; \
+    test -f "$policy"; \
+    tmp="$(mktemp)"; \
+    jq --arg repo "${SIGNED_REPO}" \
+       --arg key "/etc/pki/containers/fedora-cosmic-ovt.pub" \
+       '.transports.docker[$repo] = [{ \
+            "type": "sigstoreSigned", \
+            "keyPath": $key, \
+            "signedIdentity": { "type": "matchRepository" } \
+        }]' "$policy" > "$tmp"; \
+    cat "$tmp" > "$policy"; \
+    rm -f "$tmp"; \
+    jq -e --arg repo "${SIGNED_REPO}" '.transports.docker[$repo][0].keyPath' "$policy"
+
+RUN set -eux; \
+    mkdir -p /etc/containers/registries.d; \
+    printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' \
+        "${SIGNED_REPO}" > /etc/containers/registries.d/fedora-cosmic-ovt.yaml; \
+    cat /etc/containers/registries.d/fedora-cosmic-ovt.yaml
+
+RUN ostree container commit
+
+RUN bootc container lint

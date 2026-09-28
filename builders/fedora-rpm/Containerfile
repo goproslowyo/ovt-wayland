@@ -1,34 +1,43 @@
-# Bazzite with open-vm-tools rebuilt for Wayland copy and paste and drag and
-# drop.
+# open-vm-tools rebuilt from Fedora's source package with every patch in
+# patches/, for Wayland copy and paste and drag and drop.
 #
-# Stage 1 rebuilds Fedora's open-vm-tools with every patch in patches/, and
-# stage 2 replaces the base image's copies with the rebuilt ones.
+# Build from the repository root, since the patches live there.
 #
-#   podman build -t bazzite-ovt .
+#   podman build -f builders/fedora-rpm/Containerfile \
+#       --build-arg FEDORA_RELEASE=45 -o out/fc45 .
+#
+# The result is out/fc45/rpms/, with every binary subpackage except debuginfo
+# and the patched source rpm. Built with -t instead of -o, the image has the
+# same files under /rpms. The Release is 100%{?dist}.clipway, for example
+# 13.1.0-100.fc45.clipway, which sorts above anything Fedora ships.
 #
 # To add a patch, drop it in patches/. Nothing here needs editing. The spec is
 # rewritten from whatever the directory contains, in sorted order, so name
 # files 0001-, 0002-, ... to control apply order.
 #
-# Both stages fail rather than ship something unpatched. The version guard
+# The build fails rather than produce something unpatched. The version guard
 # catches a Fedora rebase, and the strings check catches a build where
 # autoreconf did not pick up the new sources.
 
-ARG BASE_IMAGE=ghcr.io/ublue-os/bazzite:stable
 ARG FEDORA_RELEASE=44
 ARG OVT_VERSION=13.1.0
 
-# ---------------------------------------------------------------------------
-# Stage 1: build the patched RPMs
-# ---------------------------------------------------------------------------
-FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE} AS builder
+FROM registry.fedoraproject.org/fedora:${FEDORA_RELEASE} AS build
 ARG OVT_VERSION
 # Declared again. An ARG before the first FROM is global scope only, and the
 # src.rpm signature check below needs the release to name Fedora's key.
 ARG FEDORA_RELEASE
 
-RUN dnf install -y fedora-packager rpmdevtools 'dnf-command(builddep)' \
-    && dnf clean all
+# The build needs nothing from the Cisco openh264 repo, and a flaky mirror
+# there has failed dnf builddep before. The file sits in /etc/yum.repos.d up
+# to Fedora 44 and in /usr/share/dnf5/repos.d from 45.
+RUN set -eux; \
+    for f in /etc/yum.repos.d/fedora-cisco-openh264.repo \
+             /usr/share/dnf5/repos.d/fedora-cisco-openh264.repo; do \
+        if [ -f "$f" ]; then sed -i 's/^enabled=1/enabled=0/' "$f"; fi; \
+    done; \
+    dnf install -y fedora-packager rpmdevtools 'dnf-command(builddep)'; \
+    dnf clean all
 
 RUN rpmdev-setuptree
 WORKDIR /root/rpmbuild
@@ -49,10 +58,20 @@ COPY patches/ /patches/
 # shipped binary, so verify it against Fedora's key explicitly. Compare the
 # whole line. An unsigned package prints "<name>: digests OK" and exits 0, so
 # a substring match on the verdict can be satisfied by the file's name.
+#
+# Fedora 45 moved the keys from /etc/pki/rpm-gpg to /usr/share/pki/rpm-gpg.
 RUN set -eux; \
     dnf download --source open-vm-tools \
         --enablerepo=fedora-source --enablerepo=updates-source; \
-    rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-${FEDORA_RELEASE}-primary; \
+    key=; \
+    for d in /usr/share/pki/rpm-gpg /etc/pki/rpm-gpg; do \
+        if [ -f "$d/RPM-GPG-KEY-fedora-${FEDORA_RELEASE}-primary" ]; then \
+            key="$d/RPM-GPG-KEY-fedora-${FEDORA_RELEASE}-primary"; \
+            break; \
+        fi; \
+    done; \
+    test -n "$key" || { echo "ERROR: no Fedora ${FEDORA_RELEASE} release key" >&2; exit 1; }; \
+    rpm --import "$key"; \
     set -- open-vm-tools-*.src.rpm; \
     test "$#" -eq 1 || { echo "ERROR: expected one src.rpm, got $#: $*" >&2; exit 1; }; \
     r="$1"; \
@@ -90,6 +109,12 @@ RUN set -eux; \
 # The patches generate their Wayland protocol code at build time. The spec
 # gains the packages that needs, and --with-wayland makes configure fail
 # rather than build a plugin without the Wayland backend if one is missing.
+#
+# Fedora's vmblock mount unit says Type=fuse, which needs mount.fuse from the
+# FUSE 2 package, while the package requires only fuse3. Without FUSE 2, as
+# on Fedora COSMIC Atomic 45, the mount fails at boot, vmusr runs without
+# vmblock and host to guest file drags hand the target a path that does not
+# exist. Type=fuse3 uses mount.fuse3, which fuse3 always provides.
 RUN set -eux; \
     export LC_ALL=C; \
     spec=SPECS/open-vm-tools.spec; \
@@ -124,28 +149,46 @@ RUN set -eux; \
     grep -q '^BuildRequires:.*pkgconfig(wayland-protocols)' "$spec"; \
     sed -i 's|^\([[:space:]]*\)--with-gtk4 \\$|&\n\1--with-wayland \\|' "$spec"; \
     grep -q -- '--with-wayland' "$spec"; \
+    unit='SOURCES/run-vmblock\x2dfuse.mount'; \
+    sed -i 's/^Type=fuse$/Type=fuse3/' "$unit"; \
+    grep -qx 'Type=fuse3' "$unit"; \
     echo "--- registered:"; \
     grep -nE '^(Release|Patch[0-9]+):' "$spec"
 
 RUN dnf builddep -y SPECS/open-vm-tools.spec && dnf clean all
-RUN rpmbuild -bb SPECS/open-vm-tools.spec
+RUN rpmbuild -bb SPECS/open-vm-tools.spec && rpmbuild -bs SPECS/open-vm-tools.spec
 
-# Keep only the two subpackages we replace; the rest (devel, debuginfo, test,
-# sdmp, salt-minion) are not installed in the base image and pulling them in
-# would turn a replace into a layer.
+# Keep every binary subpackage, so a dnf system can replace whichever ones it
+# has installed, and the source rpm the binaries came from. Debug packages are
+# large and nobody installs them from here. The release check catches a spec
+# edit that did not take.
 RUN set -eux; \
     mkdir -p /rpms; \
-    cp RPMS/x86_64/open-vm-tools-${OVT_VERSION}-*.clipway.*.rpm /rpms/; \
-    cp RPMS/x86_64/open-vm-tools-desktop-${OVT_VERSION}-*.clipway.*.rpm /rpms/; \
-    ls -1 /rpms
+    for f in RPMS/*/*.rpm SRPMS/*.src.rpm; do \
+        case "$f" in \
+            *-debuginfo-*|*-debugsource-*) continue ;; \
+        esac; \
+        cp "$f" /rpms/; \
+    done; \
+    ls -1 /rpms; \
+    dist="$(rpm --eval '%{?dist}')"; \
+    test -n "$dist"; \
+    for f in /rpms/*.rpm; do \
+        case "$f" in \
+            */open-vm-tools*-${OVT_VERSION}-100${dist}.clipway.*.rpm) ;; \
+            *) echo "ERROR: unexpected package name: $f" >&2; exit 1 ;; \
+        esac; \
+    done; \
+    test -e /rpms/open-vm-tools-${OVT_VERSION}-100${dist}.clipway.x86_64.rpm; \
+    test -e /rpms/open-vm-tools-desktop-${OVT_VERSION}-100${dist}.clipway.x86_64.rpm
 
 # Only the patched sources contain these log strings, so a build that lost a
-# patch fails here instead of shipping a stock binary. There is one per patch,
-# in patch order, except 0005, which adds only configure and build rules. The
-# Wayland strings after it cannot be built without that patch.
+# patch fails here instead of shipping a stock binary. There is at least one
+# per patch, in patch order, except 0005, which adds only configure and build
+# rules. The Wayland strings after it cannot be built without that patch.
 RUN set -eux; \
     cd "$(mktemp -d)"; \
-    rpm2cpio /rpms/open-vm-tools-desktop-*.rpm | cpio -idm --quiet; \
+    rpm2cpio /rpms/open-vm-tools-desktop-[0-9]*.x86_64.rpm | cpio -idm --quiet; \
     so=./usr/lib64/open-vm-tools/plugins/vmusr/libdndcp.so; \
     strings "$so" | grep -q 'unsafe fileItem'; \
     strings "$so" | grep -q 'no XDG_CURRENT_DESKTOP'; \
@@ -153,6 +196,7 @@ RUN set -eux; \
     strings "$so" | grep -q 'drag entering, telling the host'; \
     strings "$so" | grep -q 'using ext-data-control-v1'; \
     strings "$so" | grep -q 'host clip offers'; \
+    strings "$so" | grep -q 'the guest still offers this host clip'; \
     strings "$so" | grep -q 'clipboard text too large'; \
     strings "$so" | grep -q 'wl-copy is not installed'; \
     strings "$so" | grep -q 'reading the selection only after it changes'; \
@@ -168,51 +212,10 @@ RUN set -eux; \
     strings "$so" | grep -q 'outlived the drop'; \
     strings "$so" | grep -q 'native drop target shown on'; \
     strings "$so" | grep -q 'PruneStagingDirectories'; \
+    grep -qx 'Type=fuse3' './usr/lib/systemd/system/run-vmblock\x2dfuse.mount'; \
     echo "patched dndcp verified"
 
-# ---------------------------------------------------------------------------
-# Stage 2: derive the Bazzite image
-# ---------------------------------------------------------------------------
-FROM ${BASE_IMAGE}
-ARG SIGNED_REPO=ghcr.io/goproslowyo/bazzite-ovt
-
-COPY --from=builder /rpms /tmp/rpms
-
-RUN set -eux; \
-    rpm-ostree override replace \
-        /tmp/rpms/open-vm-tools-[0-9]*.rpm \
-        /tmp/rpms/open-vm-tools-desktop-[0-9]*.rpm; \
-    rm -rf /tmp/rpms
-
-# Signature verification for this image's own repo.
-#
-# The stock policy only verifies ghcr.io/ublue-os and some Red Hat sources, so
-# without this an ostree-image-signed reference to our repo is refused. Note
-# the bootstrap order. The policy lives inside the image, so a machine has to
-# run the unsigned image once before it can switch to the signed reference.
-COPY cosign.pub /etc/pki/containers/bazzite-ovt.pub
-
-RUN set -eux; \
-    policy=/etc/containers/policy.json; \
-    test -f "$policy"; \
-    tmp="$(mktemp)"; \
-    jq --arg repo "${SIGNED_REPO}" \
-       --arg key "/etc/pki/containers/bazzite-ovt.pub" \
-       '.transports.docker[$repo] = [{ \
-            "type": "sigstoreSigned", \
-            "keyPath": $key, \
-            "signedIdentity": { "type": "matchRepository" } \
-        }]' "$policy" > "$tmp"; \
-    cat "$tmp" > "$policy"; \
-    rm -f "$tmp"; \
-    jq -e --arg repo "${SIGNED_REPO}" '.transports.docker[$repo][0].keyPath' "$policy"
-
-# Tell the containers stack to look for cosign-style signature attachments on
-# this repo; without it the policy above has nothing to find.
-RUN set -eux; \
-    mkdir -p /etc/containers/registries.d; \
-    printf 'docker:\n  %s:\n    use-sigstore-attachments: true\n' \
-        "${SIGNED_REPO}" > /etc/containers/registries.d/bazzite-ovt.yaml; \
-    cat /etc/containers/registries.d/bazzite-ovt.yaml
-
-RUN ostree container commit
+# Export stage. `podman build -o <dir>` writes only this stage's files, so the
+# output directory gets rpms/ and nothing else.
+FROM scratch AS rpms
+COPY --from=build /rpms /rpms
