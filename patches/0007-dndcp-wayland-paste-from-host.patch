@@ -28,23 +28,28 @@ X11 backend does with separate selection targets. Without data control,
 copy and paste is off. The following patches read the guest selection
 and cover GNOME.
 
+The host sends its clipboard again each time the guest gets the focus,
+changed or not. Installing it again would make a new selection, which a
+clipboard manager such as Klipper treats as a new copy. The UI leaves
+the selection alone while it still holds the same host clip.
+
 Drag and drop stays with DnDUIX11, for which the backend pins GDK to its
 X11 backend, so the detection window is an Xwayland client. gtk_init()
 exits the process when it cannot open a display, and a Wayland session
 may have no Xwayland. The backend calls gtk_init_check() first and
 leaves drag and drop off without GTK. vmusr as shipped still needs the
 display, because the desktopEvents plugin, which loads first, calls
-gtk_init() itself. It does not advertise drag and
-drop, which a later patch makes work under Xwayland. It advertises copy
-and paste of plain text, RTF and PNG images.
+gtk_init() itself. It does not advertise drag and drop, which a later
+patch makes work under Xwayland. It advertises copy and paste of plain
+text, RTF and PNG images.
 ---
  services/plugins/dndcp/Makefile.am            |   2 +
  .../plugins/dndcp/copyPasteDnDWayland.cpp     | 410 ++++++++++++++++++
- services/plugins/dndcp/copyPasteUIWayland.cpp | 239 ++++++++++
- services/plugins/dndcp/copyPasteUIWayland.h   |  68 +++
+ services/plugins/dndcp/copyPasteUIWayland.cpp | 265 +++++++++++
+ services/plugins/dndcp/copyPasteUIWayland.h   |  70 +++
  .../dndcp/dndGuestBase/copyPasteDnDWayland.h  |  73 ++++
  .../dndGuestBase/copyPasteDnDWrapper.cpp      |  25 ++
- 6 files changed, 817 insertions(+)
+ 6 files changed, 845 insertions(+)
  create mode 100644 services/plugins/dndcp/copyPasteDnDWayland.cpp
  create mode 100644 services/plugins/dndcp/copyPasteUIWayland.cpp
  create mode 100644 services/plugins/dndcp/copyPasteUIWayland.h
@@ -481,10 +486,10 @@ index 0000000..dafc5a8
 +}
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
 new file mode 100644
-index 0000000..d157a29
+index 0000000..f70e56d
 --- /dev/null
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
-@@ -0,0 +1,239 @@
+@@ -0,0 +1,265 @@
 +/*********************************************************
 + * Copyright (C) 2026 GoProSlowYo
 + *
@@ -651,6 +656,32 @@ index 0000000..d157a29
 +   }
 +
 +   /*
++    * The host sends its clipboard again each time the guest gets the focus,
++    * changed or not. Installing it again makes a new selection, and a
++    * clipboard manager such as Klipper takes that for a new copy and may
++    * pop up its actions menu. Leave the selection alone when it still holds
++    * the same clip.
++    */
++   {
++      DynBuf serialized;
++      std::string current;
++
++      DynBuf_Init(&serialized);
++      if (CPClipboard_Serialize(clip, &serialized)) {
++         current.assign((const char *) DynBuf_Get(&serialized),
++                        DynBuf_GetSize(&serialized));
++      }
++      DynBuf_Destroy(&serialized);
++      if (!current.empty() && current == mLastHostClip &&
++          WaylandClipboard_IsOwner()) {
++         g_debug("%s: the guest still offers this host clip; leaving it\n",
++                 __FUNCTION__);
++         return;
++      }
++      mLastHostClip = current;
++   }
++
++   /*
 +    * Log every format the host offered. The host may attach a text rendering,
 +    * such as a filename or URL, to an image copy, so the order in which the
 +    * formats are consumed decides which one is used.
@@ -726,10 +757,10 @@ index 0000000..d157a29
 +
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
 new file mode 100644
-index 0000000..7249a4f
+index 0000000..a2db2fe
 --- /dev/null
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,70 @@
 +/*********************************************************
 + * Copyright (C) 2026 GoProSlowYo
 + *
@@ -794,6 +825,8 @@ index 0000000..7249a4f
 +   void GetRemoteClipboardCB(const CPClipboard *clip);
 +
 +   GuestCopyPasteMgr *mCP;
++   /* The last host clip, serialized, to tell a repeat from a new one. */
++   std::string mLastHostClip;
 +   bool mInited;
 +};
 +

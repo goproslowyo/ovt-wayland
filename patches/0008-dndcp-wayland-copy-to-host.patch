@@ -35,7 +35,7 @@ overwrite a newer host clipboard as soon as the VM gets focus.
  2 files changed, 511 insertions(+), 6 deletions(-)
 
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index d157a29..29e96f5 100644
+index f70e56d..df23dff 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
 @@ -21,7 +21,7 @@
@@ -282,8 +282,8 @@ index d157a29..29e96f5 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -163,6 +334,15 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
-       return;
+@@ -189,6 +360,15 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+       mLastHostClip = current;
     }
  
 +   /*
@@ -298,7 +298,7 @@ index d157a29..29e96f5 100644
     /*
      * Log every format the host offered. The host may attach a text rendering,
      * such as a filename or URL, to an image copy, so the order in which the
-@@ -234,6 +414,315 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -260,6 +440,315 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
        g_warning("%s: could not install the local selection\n", __FUNCTION__);
        return;
     }
@@ -615,7 +615,7 @@ index d157a29..29e96f5 100644
 +   CPClipboard_Destroy(&clip);
 +}
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index 7249a4f..e9e3b32 100644
+index a2db2fe..144c81e 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
 @@ -20,7 +20,7 @@
@@ -627,7 +627,7 @@ index 7249a4f..e9e3b32 100644
   * ext-data-control-v1 where the compositor implements it. This is the
   * counterpart of copyPasteUIX11.h for the Wayland platform.
   *
-@@ -60,9 +60,25 @@ public:
+@@ -60,11 +60,27 @@ public:
  private:
     /* Called when the host sends new clipboard contents. */
     void GetRemoteClipboardCB(const CPClipboard *clip);
@@ -643,6 +643,8 @@ index 7249a4f..e9e3b32 100644
 +   std::string mLastClipboardText;
 +   std::string mLastClipboardImage;
 +   std::string mLastClipboardRtf;
+    /* The last host clip, serialized, to tell a repeat from a new one. */
+    std::string mLastHostClip;
     bool mInited;
 +
 +   bool GetSelectionGeneration(guint64 *generation);

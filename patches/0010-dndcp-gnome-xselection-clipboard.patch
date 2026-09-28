@@ -35,10 +35,10 @@ text went both ways through the X selection.
 ---
  services/plugins/dndcp/Makefile.am            |   4 +
  .../plugins/dndcp/copyPasteDnDWayland.cpp     |   4 +-
- services/plugins/dndcp/copyPasteUIWayland.cpp | 653 +++++++++++++++++-
+ services/plugins/dndcp/copyPasteUIWayland.cpp | 656 +++++++++++++++++-
  services/plugins/dndcp/copyPasteUIWayland.h   |  27 +-
  .../dndcp/dndGuestBase/copyPasteDnDWayland.h  |   7 +-
- 5 files changed, 670 insertions(+), 25 deletions(-)
+ 5 files changed, 672 insertions(+), 26 deletions(-)
 
 diff --git a/services/plugins/dndcp/Makefile.am b/services/plugins/dndcp/Makefile.am
 index 1708607..db239eb 100644
@@ -71,7 +71,7 @@ index dafc5a8..ea41d2c 100644
     gdk_set_allowed_backends("x11");
  #ifdef GTK4
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index af8d4f1..9143f74 100644
+index b4f981b..3f7950b 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
 @@ -22,10 +22,14 @@
@@ -721,7 +721,17 @@ index af8d4f1..9143f74 100644
     }
  
     mCP->srcRecvClipChanged.connect(
-@@ -771,6 +1308,10 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -714,7 +1251,8 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+       }
+       DynBuf_Destroy(&serialized);
+       if (!current.empty() && current == mLastHostClip &&
+-          WaylandClipboard_IsOwner()) {
++          (WaylandClipboard_IsOwner() ||
++           CopyPasteXWriterIsOwner(XWriterClipboard()))) {
+          g_debug("%s: the guest still offers this host clip; leaving it\n",
+                  __FUNCTION__);
+          return;
+@@ -797,6 +1335,10 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
     bool ok;
     if (WaylandClipboard_IsAvailable()) {
        ok = WaylandClipboard_Offer(&items[0], items.size());
@@ -732,7 +742,7 @@ index af8d4f1..9143f74 100644
     } else {
        /*
         * wl-copy serves one payload. Prefer an image, then plain text, and
-@@ -814,17 +1355,84 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -840,17 +1382,84 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
  }
  
  
@@ -820,7 +830,7 @@ index af8d4f1..9143f74 100644
   *
   *-----------------------------------------------------------------------------
   */
-@@ -836,6 +1444,10 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
+@@ -862,6 +1471,10 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
        *generation = WaylandClipboard_GetSelectionSerial();
        return true;
     }
@@ -831,7 +841,7 @@ index af8d4f1..9143f74 100644
     return false;
  }
  
-@@ -881,10 +1493,15 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -907,10 +1520,15 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     /*
      * When this client owns the selection, the selection holds what the host
      * sent, so there is nothing new to report. Reading it back would send the
@@ -851,7 +861,7 @@ index af8d4f1..9143f74 100644
                __FUNCTION__);
        SendClipNotChanged();
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index 602891b..3ccf135 100644
+index c5d5044..1ec1f86 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
 @@ -21,9 +21,13 @@
@@ -871,8 +881,8 @@ index 602891b..3ccf135 100644
   *
   * Text, RTF and PNG images are supported.
   */
-@@ -75,7 +79,24 @@ private:
-    std::string mLastClipboardRtf;
+@@ -77,7 +81,24 @@ private:
+    std::string mLastHostClip;
     bool mInited;
  
 +   /*

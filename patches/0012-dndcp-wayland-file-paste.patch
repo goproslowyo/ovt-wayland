@@ -140,7 +140,7 @@ index e9246f9..4586367 100644
            DND_CP_CAP_BIG_BUFFER;
  }
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index 597bc04..7077273 100644
+index eba52e9..51f0960 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
 @@ -50,6 +50,7 @@
@@ -283,7 +283,7 @@ index 597bc04..7077273 100644
     mInited = true;
     return true;
  }
-@@ -1250,6 +1328,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -1277,6 +1355,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
      */
     ClearLastClipboard();
  
@@ -298,7 +298,7 @@ index 597bc04..7077273 100644
     /*
      * Log every format the host offered. The host may attach a text rendering,
      * such as a filename or URL, to an image copy, so the order in which the
-@@ -1261,6 +1347,27 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -1288,6 +1374,27 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
             CPClipboard_ItemExists(clip, CPFORMAT_RTF)      ? " rtf"   : "",
             CPClipboard_ItemExists(clip, CPFORMAT_FILELIST) ? " files" : "");
  
@@ -326,7 +326,7 @@ index 597bc04..7077273 100644
     /*
      * Offer every format the host sent in one selection, so an application
      * asking for rich text gets RTF while one asking for plain text gets the
-@@ -1501,7 +1608,9 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -1528,7 +1635,9 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     /*
      * When this client owns the selection, the selection holds what the host
      * sent, so there is nothing new to report. Reading it back would send the
@@ -337,7 +337,7 @@ index 597bc04..7077273 100644
      * fallback this process owns the X selection after
      * CopyPasteXWriterOffer(). GDK answers a read of it from this main loop,
      * which the read holds, so the read would also wait out the budget. A
-@@ -2317,6 +2426,569 @@ CopyPasteUIWayland::GetLocalFileList(gint64 deadline)  // IN: monotonic, us
+@@ -2344,6 +2453,569 @@ CopyPasteUIWayland::GetLocalFileList(gint64 deadline)  // IN: monotonic, us
  }
  
  
@@ -908,7 +908,7 @@ index 597bc04..7077273 100644
   *-----------------------------------------------------------------------------
   *
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index 2a18969..1e983c5 100644
+index eced9db..2104466 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
 @@ -29,7 +29,7 @@
@@ -998,7 +998,7 @@ index 2a18969..1e983c5 100644
  
     GuestCopyPasteMgr *mCP;
     CPClipboard mClipboard;
-@@ -121,7 +164,16 @@ private:
+@@ -123,7 +166,16 @@ private:
     /* The generation last read again after its reads ran out of time. */
     guint64 mRetriedGeneration;
  

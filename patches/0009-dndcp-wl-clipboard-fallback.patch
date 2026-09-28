@@ -36,7 +36,7 @@ warning at start-up says that host to guest copy and paste is off.
  5 files changed, 413 insertions(+), 24 deletions(-)
 
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index 29e96f5..af8d4f1 100644
+index df23dff..b4f981b 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
 @@ -22,15 +22,22 @@
@@ -488,7 +488,7 @@ index 29e96f5..af8d4f1 100644
     mCP->srcRecvClipChanged.connect(
        sigc::mem_fun(this, &CopyPasteUIWayland::GetRemoteClipboardCB));
     mCP->destRequestClipChanged.connect(
-@@ -358,7 +720,8 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -384,7 +746,8 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
      * Offer every format the host sent in one selection, so an application
      * asking for rich text gets RTF while one asking for plain text gets the
      * text rendering. The X11 backend offers text and RTF together the same
@@ -498,7 +498,7 @@ index 29e96f5..af8d4f1 100644
      */
     std::vector<WaylandClipItem> items;
     void *rtfBuf = NULL;
-@@ -405,9 +768,28 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -431,9 +794,28 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
     g_debug("%s: offering %d formats locally\n", __FUNCTION__,
             (int) items.size());
  
@@ -528,7 +528,7 @@ index 29e96f5..af8d4f1 100644
     }
  
     if (!ok) {
-@@ -499,7 +881,8 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -525,7 +907,8 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     /*
      * When this client owns the selection, the selection holds what the host
      * sent, so there is nothing new to report. Reading it back would send the
@@ -539,7 +539,7 @@ index 29e96f5..af8d4f1 100644
     if (WaylandClipboard_IsOwner()) {
        g_debug("%s: we own the local selection, nothing new for the host\n",
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index e9e3b32..602891b 100644
+index 144c81e..c5d5044 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
 @@ -21,8 +21,9 @@
