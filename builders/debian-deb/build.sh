@@ -143,16 +143,6 @@ do_prepare() {
     grep -q '^ libwayland-dev, wayland-protocols (>= 1.39),$' debian/control
     if grep -q 'gtk-3\|gtkmm-3' debian/control; then exit 1; fi
 
-    # Without ext-data-control-v1, as on GNOME without an X display, copy and
-    # paste goes through wl-copy and wl-paste.
-    awk '
-        /^Package: / { pkg = $2 }
-        pkg == "open-vm-tools-desktop" && /^Recommends:$/ { print; print " wl-clipboard,"; next }
-        { print }
-    ' debian/control > debian/control.new
-    mv debian/control.new debian/control
-    grep -q '^ wl-clipboard,$' debian/control
-
     # Debian's epoch is 2. A 0 revision sorts below a Debian or Ubuntu upload
     # of the same upstream version, and 13.1.0 sorts above the 13.0.10 they
     # ship today.
@@ -195,7 +185,7 @@ do_build() {
 
 # Only the patched sources contain these log strings, so a build that lost a
 # patch fails here instead of shipping a stock binary. There is one per patch,
-# in patch order, except 0005, which adds only configure and build rules. Keep
+# in patch order, except 0201, which adds only configure and build rules. Keep
 # the list in step with the Fedora builder's.
 do_check() {
     d="$(mktemp -d)"
@@ -218,7 +208,6 @@ using ext-data-control-v1
 host clip offers
 the guest still offers this host clip
 clipboard text too large
-wl-copy is not installed
 reading the selection only after it changes
 skipping non-file uri
 paste observed, requesting files

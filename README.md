@@ -50,7 +50,7 @@ How each row was tested:
   host drags into Nautilus, and guest drags of files and text out of a
   maximized Nautilus and Text Editor. A test program also drove the plugin's
   own detection window and uinput code through the host to guest sequence,
-  and 199 of 200 runs landed the drop. Without patch 0019, host drags into
+  and 199 of 200 runs landed the drop. Without patch 0404, host drags into
   Nautilus do not land.
 - Xorg. Xfce 4.20 with Thunar 4.20.9 on the Fedora 44 VM, by hand. Text and
   file copy and paste both ways, and file drags both ways. Stock
@@ -82,21 +82,20 @@ The guest needs:
 - `vmtoolsd -n vmusr` started through `vmware-user-suid-wrapper`, which hands
   it the vmblock and uinput descriptors. Drag and drop under Wayland needs
   uinput.
-- `wl-clipboard`, only as a last fallback where neither of the clipboard
-  paths below exists.
+- For copy and paste outside GNOME, a compositor with `ext-data-control-v1`.
 
 What each compositor gets depends on the protocols it offers.
 
 | Compositor offers | Copy and paste | Drag H to G | Drag G to H |
 |---|---|---|---|
 | `ext-data-control-v1` (KWin and wlroots releases that have it) | full, native | native if it also has `zwlr_layer_shell_v1` | native with layer shell, else XDND, bridged |
-| no data control, X selection mirrored (Mutter) | full, through Xwayland | XDND, bridged by Mutter | XDND, bridged |
-| neither, `wl-clipboard` installed | one format per copy | XDND to X11 apps only | X11 sources only |
+| no data control, GNOME (Mutter) | full, through Xwayland | XDND, bridged by Mutter | XDND, bridged |
+| no data control, anything else | off | XDND to X11 apps only | X11 sources only |
 
 Tested: Plasma 6.7.5, sway 1.11, GNOME 50.3, COSMIC 1.8 and Xfce 4.20 on Xorg,
 all against VMware Workstation Pro 26H1u1 on a Windows 10 host. Their guest to
 host drags went through XDND. Where the compositor has layer shell, guest to
-host drags now use a native drop target first (patch 0021). It was tested with
+host drags now use a native drop target first (patch 0405). It was tested with
 the host on Plasma 6.7.5, sway 1.11 and niri 26.04, where xwayland-satellite
 cannot carry a drag into X at all. It falls back to
 XDND where nothing reaches it.
@@ -105,8 +104,9 @@ tested, because its Xwayland exits on the first window any X11 client maps,
 `xterm` included, and vmusr cannot start without it. Not tested: other VMware
 hosts such as Fusion, and compositor releases older than their
 `ext-data-control-v1` support. Older KWin and sway releases offer only
-`wlr-data-control`, which this build does not bind, so they take the Xwayland
-path. That works where the compositor mirrors the X selection to Wayland.
+`wlr-data-control`, which this build does not bind, so copy and paste stays
+off there. The Xwayland path works only on GNOME, where Mutter keeps the X
+selection and the Wayland one in step in both directions.
 
 ## How it works
 
@@ -121,9 +121,11 @@ GNOME does not implement data control. There the backend uses the X
 `CLIPBOARD` selection through Xwayland, which Mutter keeps in step with the
 Wayland one for any X client, focused or not. It owns that selection through
 GDK to install a host clip, with every format at once, and reads it only after
-GDK reports a change. `wl-clipboard` is the last fallback, for a compositor
-with neither data control nor that mirror. `wl-copy` serves one type per
-selection and, like `wl-paste`, maps a small window to get focus.
+GDK reports a change. Other compositors do not keep the two selections in step
+both ways, so without data control copy and paste stays off there. An earlier
+`wl-clipboard` fallback was removed, because it could not run. vmusr does not
+start without an X display, and on these compositors no change ever reaches
+the X selection it watches.
 
 The backend puts a deadline on every selection read and write, so a peer that
 stops reading cannot stall the daemon's main loop, which also carries the RPC
@@ -149,7 +151,7 @@ default on Fedora. The Bluefin 44 test guest shipped the mount disabled, and
 `systemctl enable --now 'run-vmblock\x2dfuse.mount'` turns it on. Without
 vmblock the guest declines a file paste and logs why.
 
-Patch 0022 removes a staging directory about two minutes after its transfer
+Patch 0501 removes a staging directory about two minutes after its transfer
 is over. It keeps a directory while the clipboard still offers its files,
 while a drag still uses it, and while any process has a file in it open or
 uses it as its working directory. The check runs once a minute. It does not
@@ -161,7 +163,7 @@ read a dropped file again later.
 
 Guest to host drag, of files or text, takes one of two paths.
 
-- Where the compositor has `zwlr_layer_shell_v1`, patch 0021 shows the
+- Where the compositor has `zwlr_layer_shell_v1`, patch 0405 shows the
   layer-shell overlays as a Wayland drop target. The drag enters them as it
   would any Wayland window, and the overlay reads the file list or text for
   the host. It accepts copy only, since the host reads the files after the
@@ -169,24 +171,24 @@ Guest to host drag, of files or text, takes one of two paths.
   If nothing reaches the overlay, the plugin uses the detection window below.
 - Elsewhere the upstream XDND code runs with an Xwayland detection window.
   KWin and Mutter bridge its XDND to native Wayland applications. KWin
-  bridges only to managed windows, so under Wayland patch 0013 keeps the
+  bridges only to managed windows, so under Wayland patch 0401 keeps the
   window managed and waits until the window manager lists it before moving
   the pointer.
 
 Host to guest drag takes one of two paths.
 
 - Where the compositor has `zwlr_layer_shell_v1`, as sway and KWin do, and
-  uinput is available, patches 0014 to 0018 run a
+  uinput is available, patches 0402 and 0403 run a
   native `wl_data_device` drag. It maps a transparent layer-shell overlay on
   each output, fakes a button press on it through uinput, and starts the drag
   from that press. The overlay unmaps once the drag has started. The files are
   empty placeholders until the target accepts, and the block goes on just
   before the button is released.
-- GNOME has no layer shell, so the drag stays on XDND there. Patch 0019 makes
+- GNOME has no layer shell, so the drag stays on XDND there. Patch 0404 makes
   it meet the conditions under which Mutter bridges XDND to Wayland clients.
   It keeps the detection window above the focused window, presses inside it
   and waits for GTK to start the drag before the pointer moves on, and
-  releases once the target accepts or after 1.5 s. Patch 0020 raises the guest
+  releases once the target accepts or after 1.5 s. It also raises the guest
   to host drop target, and presses Escape through uinput to cancel a guest
   drag that is still running 300 ms after a guest to host drop. Both apply
   only when the X window manager says it is Mutter. Another compositor
@@ -223,6 +225,9 @@ sway needs the native path.
   drop target. Sway floats it on its own. Elsewhere, float it in the
   compositor's configuration, for example in sway syntax
   `for_window [title="vmware-user"] floating enable`.
+- On niri, vmusr can start at login before niri's X server is ready, and
+  exits with `Failed to open display`. Log out and in again, or start
+  `vmware-user-suid-wrapper` by hand.
 - On niri, turn off scrolling at the screen edges during a drag, with
   `gestures { dnd-edge-view-scroll { trigger-width 0; }; }`. The guest pointer
   stays at the edge a guest to host drag left from, and niri scrolls the view
@@ -231,35 +236,33 @@ sway needs the native path.
 
 ## Patches
 
-Twenty-two patches against `open-vm-tools 13.1.0-25218885`, applied in order
-and grouped by topic. Each builds on its own, and each explains its reasoning
-in its commit message. The first four change only upstream code and apply to
-X11 sessions as well.
+Fifteen patches against `open-vm-tools 13.1.0-25218885`, applied in order
+and numbered by group. Each builds on its own, and each explains its
+reasoning in its commit message. The 01 group changes only upstream code,
+applies to X11 sessions as well and could go upstream on its own.
 
 | Patch | What it does |
 |---|---|
-| `0001-dndcp-validate-host-input` | Validates file lists and file names from the host and from drag sources. |
-| `0002-dndcp-any-desktop-file-drop` | Offers file drops and file pastes on desktops other than GNOME and KDE. |
-| `0003-dndcp-fake-pointer` | Keeps the faked pointer on the screen and never leaves its button down. |
-| `0004-dndcp-drag-read-uri-list` | Reads a guest drag as `text/uri-list` or text instead of through the file portal. |
-| `0005-dndcp-wayland-configure` | Adds `--with-wayland` and generates the protocol code at build time. |
-| `0006-dndcp-data-control-client` | Clipboard client for `ext-data-control-v1`. |
-| `0007-dndcp-wayland-paste-from-host` | Installs host clips in a Wayland session. |
-| `0008-dndcp-wayland-copy-to-host` | Sends the guest clipboard to the host in a Wayland session. |
-| `0009-dndcp-wl-clipboard-fallback` | Falls back to `wl-clipboard` without data control. |
-| `0010-dndcp-gnome-xselection-clipboard` | Copies and pastes through the Xwayland selection on GNOME. |
-| `0011-dndcp-wayland-file-copy` | Sends guest file lists to the host. |
-| `0012-dndcp-wayland-file-paste` | Pastes host files lazily through vmblock, and file contents. |
-| `0013-dndcp-wayland-xdnd` | Drag and drop over Xwayland in a Wayland session. |
-| `0014-dndcp-native-drag-overlay` | Maps a layer-shell overlay for a native drag. |
-| `0015-dndcp-native-drag-start` | Starts a native `wl_data_device` drag from the faked press. |
-| `0016-dndcp-native-drag-host-to-guest` | Uses the native drag for host to guest drags. |
-| `0017-dndcp-native-drag-placeholders` | Stages placeholders and blocks only at the drop, for every file drag. |
-| `0018-dndcp-native-drag-accept` | Releases only once the target accepts. |
-| `0019-dndcp-gnome-drag-host-to-guest` | Host to guest drags into Wayland applications on GNOME. |
-| `0020-dndcp-gnome-drag-guest-to-host` | Guest to host drags on GNOME and tiling compositors. |
-| `0021-dndcp-native-drop-target` | Receives guest to host drags through a native drop target where layer shell exists. |
-| `0022-dndcp-staging-cleanup` | Removes staging directories once their transfers are over. |
+| **01, fixes to upstream code** | |
+| `0101-dndcp-validate-host-input` | Validates file lists and file names from the host and from drag sources. |
+| `0102-dndcp-any-desktop-file-drop` | Offers file drops and file pastes on desktops other than GNOME and KDE. |
+| `0103-dndcp-fake-pointer` | Keeps the faked pointer on the screen and never leaves its button down. |
+| `0104-dndcp-drag-read-uri-list` | Reads a guest drag as `text/uri-list` or text instead of through the file portal. |
+| **02, Wayland clipboard** | |
+| `0201-dndcp-wayland-configure` | Adds `--with-wayland` and generates the protocol code at build time. |
+| `0202-dndcp-data-control-client` | Clipboard client for `ext-data-control-v1`. |
+| `0203-dndcp-wayland-clipboard` | Copy and paste in both directions through data control. |
+| `0204-dndcp-gnome-xselection-clipboard` | Copy and paste through the Xwayland selection on GNOME. |
+| **03, files** | |
+| `0301-dndcp-wayland-file-copy-paste` | File copy to the host, and lazy file paste from the host through vmblock. |
+| **04, drag and drop** | |
+| `0401-dndcp-wayland-xdnd` | Drag and drop over Xwayland in a Wayland session. |
+| `0402-dndcp-native-drag-source` | A native `wl_data_device` drag from a layer-shell overlay and a faked press. |
+| `0403-dndcp-native-drag-host-to-guest` | Host to guest drags through the native drag, with placeholders and a release once the target accepts. |
+| `0404-dndcp-gnome-drag` | Drags in both directions on GNOME, and guest to host drags on tiling compositors. |
+| `0405-dndcp-native-drop-target` | Guest to host drags through a native drop target where layer shell exists. |
+| **05, cleanup** | |
+| `0501-dndcp-staging-cleanup` | Removes staging directories once their transfers are over. |
 
 ### Using the patches elsewhere
 
@@ -535,7 +538,7 @@ own runtime directory. Use `grep -a`, since some upstream lines contain NULs.
 log=/run/user/$(id -u)/vmusr.log
 grep -a 'ping reply caps' $log              # want 1555 and aab
 grep -a 'using ext-data-control-v1' $log    # native clipboard
-grep -a 'reading the selection only' $log   # wl-clipboard fallback, "through X"
+grep -a 'reading the selection only' $log   # GNOME X selection, "through X"
 grep -a 'vmblock' $log                      # want "ready"
 grep -a 'drag source' $log                  # native drag source ready, or why not
 ```
@@ -561,7 +564,7 @@ grep -a 'drag source' $log                  # native drag source ready, or why n
   `drag entering, telling the host`. On the drop it logs
   `finished the drop of`. `nothing reached the native drop target` means it
   fell back to the detection window.
-- `the guest drag outlived the drop; cancelling it` means patch 0020 pressed
+- `the guest drag outlived the drop; cancelling it` means patch 0404 pressed
   Escape after a guest to host drop on GNOME.
 - `PruneStagingDirectories` logs `removed` and the path of each staging
   directory it deletes.

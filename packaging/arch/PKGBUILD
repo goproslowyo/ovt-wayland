@@ -28,8 +28,7 @@ makedepends=('git' 'chrpath' 'doxygen' 'python' 'rpcsvc-proto' 'glib2-devel'
              'wayland-protocols')
 checkdepends=('cunit')
 optdepends=('netctl: suspend-resume network state'
-            'networkmanager: suspend-resume network state'
-            'wl-clipboard: clipboard fallback for compositors without data control')
+            'networkmanager: suspend-resume network state')
 provides=("${_pkgname}=${epoch}:${pkgver}")
 conflicts=("${_pkgname}")
 backup=('etc/pam.d/vmtoolsd'
@@ -39,29 +38,21 @@ options=('docs')
 
 # Keep in the order of patches/. prepare.sh checks that this list matches.
 _patches=(
-        '0001-dndcp-validate-host-input.patch'
-        '0002-dndcp-any-desktop-file-drop.patch'
-        '0003-dndcp-fake-pointer.patch'
-        '0004-dndcp-drag-read-uri-list.patch'
-        '0005-dndcp-wayland-configure.patch'
-        '0006-dndcp-data-control-client.patch'
-        '0007-dndcp-wayland-paste-from-host.patch'
-        '0008-dndcp-wayland-copy-to-host.patch'
-        '0009-dndcp-wl-clipboard-fallback.patch'
-        '0010-dndcp-gnome-xselection-clipboard.patch'
-        '0011-dndcp-wayland-file-copy.patch'
-        '0012-dndcp-wayland-file-paste.patch'
-        '0013-dndcp-wayland-xdnd.patch'
-        '0014-dndcp-native-drag-overlay.patch'
-        '0015-dndcp-native-drag-start.patch'
-        '0016-dndcp-native-drag-host-to-guest.patch'
-        '0017-dndcp-native-drag-placeholders.patch'
-        '0018-dndcp-native-drag-accept.patch'
-        '0019-dndcp-gnome-drag-host-to-guest.patch'
-        '0020-dndcp-gnome-drag-guest-to-host.patch'
-        '0021-dndcp-native-drop-target.patch'
-        '0022-dndcp-staging-cleanup.patch'
-)
+        '0101-dndcp-validate-host-input.patch'
+        '0102-dndcp-any-desktop-file-drop.patch'
+        '0103-dndcp-fake-pointer.patch'
+        '0104-dndcp-drag-read-uri-list.patch'
+        '0201-dndcp-wayland-configure.patch'
+        '0202-dndcp-data-control-client.patch'
+        '0203-dndcp-wayland-clipboard.patch'
+        '0204-dndcp-gnome-xselection-clipboard.patch'
+        '0301-dndcp-wayland-file-copy-paste.patch'
+        '0401-dndcp-wayland-xdnd.patch'
+        '0402-dndcp-native-drag-source.patch'
+        '0403-dndcp-native-drag-host-to-guest.patch'
+        '0404-dndcp-gnome-drag.patch'
+        '0405-dndcp-native-drop-target.patch'
+        '0501-dndcp-staging-cleanup.patch')
 source=("git+https://github.com/vmware/open-vm-tools#tag=stable-${pkgver}"
         'vmtoolsd.pam'
         'vmtoolsd.service'

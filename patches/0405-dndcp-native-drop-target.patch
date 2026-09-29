@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: GoProSlowYo <68455785+goproslowyo@users.noreply.github.com>
 Date: Fri, 25 Sep 2026 01:42:56 -0700
-Subject: [PATCH 21/22] dndcp: Receive guest to host drags through a native
+Subject: [PATCH 14/15] dndcp: Receive guest to host drags through a native
  drop target
 
 A guest to host drag reaches the host through the detection window, an

@@ -1,7 +1,7 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: GoProSlowYo <68455785+goproslowyo@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 21:25:11 -0700
-Subject: [PATCH 22/22] dndcp: Remove staging directories once their transfers
+Subject: [PATCH 15/15] dndcp: Remove staging directories once their transfers
  are over
 
 A host to guest file transfer is staged under
@@ -122,10 +122,10 @@ index 31bb391..aedc31e 100644
     delete m_dndUI;
  #if defined(GTK3)
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index 51f0960..2a7bac3 100644
+index c56494f..601b3ba 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
-@@ -1346,6 +1346,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -999,6 +999,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
        mLastHostClip = current;
     }
  
@@ -140,7 +140,7 @@ index 51f0960..2a7bac3 100644
     /*
      * The host clipboard has changed, whether or not the clip can be
      * installed here. Forget the earlier clips, so that a later guest copy
-@@ -2833,6 +2841,10 @@ CopyPasteUIWayland::SetRemoteFileList(const CPClipboard *clip)  // IN
+@@ -2451,6 +2459,10 @@ CopyPasteUIWayland::SetRemoteFileList(const CPClipboard *clip)  // IN
     }
     mHGStagingDir = stagingDir;
     free(stagingDir);
@@ -151,7 +151,7 @@ index 51f0960..2a7bac3 100644
  
     mBlockAdded = mBlockCtrl->AddBlock(mBlockCtrl->fd, mHGStagingDir.c_str());
     if (!mBlockAdded) {
-@@ -3008,6 +3020,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2626,6 +2638,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
         * Ask for the staging dir to be deleted on next reboot, as the X11
         * backends do. On POSIX, File_UnlinkDelayed() unlinks at once and
         * fails on a directory, so this removes nothing.
@@ -161,7 +161,7 @@ index 51f0960..2a7bac3 100644
         */
        DnD_DeleteStagingFiles(mHGStagingDir.c_str(), TRUE);
     } else {
-@@ -3023,6 +3038,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2641,6 +2656,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
   *
   *    Send the guest selection read into mClipboard to the host.
   *
@@ -171,7 +171,7 @@ index 51f0960..2a7bac3 100644
   * Results:
   *    None.
   *
-@@ -3035,6 +3053,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2653,6 +2671,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
  void
  CopyPasteUIWayland::SendLocalClip(void)
  {

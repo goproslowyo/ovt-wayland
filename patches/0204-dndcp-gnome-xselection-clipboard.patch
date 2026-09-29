@@ -1,25 +1,21 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: GoProSlowYo <68455785+goproslowyo@users.noreply.github.com>
 Date: Thu, 24 Sep 2026 21:25:10 -0700
-Subject: [PATCH 10/22] dndcp: Copy and paste through the Xwayland selection on
+Subject: [PATCH 08/15] dndcp: Copy and paste through the Xwayland selection on
  GNOME
 
-On GNOME wl-copy and wl-paste each map a window to be given focus, and
-it shows in the dock and takes the focus for a moment on every run. The
-host asks for the guest clipboard every few seconds while the pointer
-crosses the VM's edge, so the window keeps flashing.
+GNOME does not implement ext-data-control-v1, so copy and paste between
+host and guest is off in a GNOME Wayland session. Mutter keeps the X
+CLIPBOARD selection in step with the Wayland one, and answers any X
+client for it, focused or not.
 
-Mutter keeps the X CLIPBOARD selection in step with the Wayland one, and
-answers any X client for it, focused or not. Where there is no
-ext-data-control-v1 but there is an X display, the backend now owns and
-reads that selection instead. Host clips go on it through GDK, with
-every format the host sent, and Mutter makes them the Wayland selection.
-Reads use a separate Xlib connection with an unmapped InputOnly window,
-and a property of their own for each read, so that a late reply to an
-earlier read is ignored. Large selections arrive through INCR, up to
-CPCLIPITEM_MAX_SIZE_V3. wl-copy and wl-paste remain for a session
-without an X display, and wl-paste also reads when the X selection has
-no owner.
+Where there is no ext-data-control-v1 but there is an X display, the
+backend now owns and reads that selection instead. Host clips go on it
+through GDK, with every format the host sent, and Mutter makes them the
+Wayland selection. Reads use a separate Xlib connection with an unmapped
+InputOnly window, and a property of their own for each read, so that a
+late reply to an earlier read is ignored. Large selections arrive
+through INCR, up to CPCLIPITEM_MAX_SIZE_V3.
 
 GDK on X11 reports each change of owner of the X selection, as "changed"
 in GTK4 and as "owner-change" in GTK3, without reading anything, and
@@ -30,18 +26,23 @@ this process owns through GDK is not read back. GDK would answer such a
 read from the main loop, which the read holds, so the read would only
 wait out its budget.
 
+This makes copy and paste work on GNOME only. On any other compositor
+without ext-data-control-v1, copy and paste stays off.
+
 Tested by hand with the whole series on GNOME 50.3 (Bluefin 44), where
 text went both ways through the X selection.
 ---
  services/plugins/dndcp/Makefile.am            |   4 +
  .../plugins/dndcp/copyPasteDnDWayland.cpp     |   4 +-
- services/plugins/dndcp/copyPasteUIWayland.cpp | 656 +++++++++++++++++-
- services/plugins/dndcp/copyPasteUIWayland.h   |  27 +-
+ services/plugins/dndcp/copyPasteUIWayland.cpp | 658 +++++++++++++++++-
+ services/plugins/dndcp/copyPasteUIWayland.h   |  24 +-
  .../dndcp/dndGuestBase/copyPasteDnDWayland.h  |   7 +-
- 5 files changed, 672 insertions(+), 26 deletions(-)
+ .../dndcp/waylandClipboard/waylandClipboard.c |  12 +-
+ .../dndcp/waylandClipboard/waylandClipboard.h |  13 +-
+ 7 files changed, 692 insertions(+), 30 deletions(-)
 
 diff --git a/services/plugins/dndcp/Makefile.am b/services/plugins/dndcp/Makefile.am
-index 1708607..db239eb 100644
+index 1708607..d2247b7 100644
 --- a/services/plugins/dndcp/Makefile.am
 +++ b/services/plugins/dndcp/Makefile.am
 @@ -115,6 +115,10 @@ if HAVE_WAYLAND
@@ -49,8 +50,8 @@ index 1708607..db239eb 100644
  libdndcp_la_LIBADD += @WAYLAND_LIBS@
  
 +# The Wayland backend is built for both the GTK3 and the GTK4 configuration.
-+# It owns the selection through ext-data-control-v1 and falls back to
-+# wl-clipboard where the compositor does not implement it. On that fallback it
++# It owns the selection through ext-data-control-v1 and falls back to the X
++# selection where the compositor does not implement it. On that fallback it
 +# watches the selection through GdkClipboard in GTK4 and GtkClipboard in GTK3.
  libdndcp_la_SOURCES += copyPasteDnDWayland.cpp
  libdndcp_la_SOURCES += copyPasteUIWayland.cpp
@@ -71,37 +72,39 @@ index dafc5a8..ea41d2c 100644
     gdk_set_allowed_backends("x11");
  #ifdef GTK4
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index b4f981b..3f7950b 100644
+index df23dff..8de8720 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
-@@ -22,10 +22,14 @@
+@@ -22,15 +22,25 @@
   * Wayland implementation of host<->guest copy/paste, derived from
   * copyPasteUIX11.cpp. Rather than owning an X selection through GtkClipboard,
   * the local selection is owned and read through ext-data-control-v1 in
-- * waylandClipboard.c. Where the compositor does not implement it, wl-copy
-- * and wl-paste are used. A data control client needs no keyboard focus,
-- * unlike the core wl_data_device protocol that GtkClipboard uses on Wayland.
-- * That is what allows a background daemon to bridge the clipboard.
+- * waylandClipboard.c. A data control client needs no keyboard focus, unlike
+- * the core wl_data_device protocol that GtkClipboard uses on Wayland. That is
+- * what allows a background daemon to bridge the clipboard.
 + * waylandClipboard.c. Where the compositor does not implement it, the
 + * selection is owned and read on the X CLIPBOARD selection through Xwayland,
-+ * which the compositor keeps in step with the Wayland one. wl-copy and
-+ * wl-paste are used when there is no X display, and wl-paste also when the X
-+ * selection has no owner. A data control client and
++ * which GNOME keeps in step with the Wayland one. A data control client and
 + * an X client need no keyboard focus, unlike the core wl_data_device
 + * protocol that GtkClipboard uses on Wayland. That is what allows a
 + * background daemon to bridge the clipboard.
   */
  
  #define G_LOG_DOMAIN "dndcp"
-@@ -38,6 +42,7 @@
- #include <sys/poll.h>
- #include <sys/wait.h>
- #include <unistd.h>
+ 
+ #include <glib.h>
++#include <glib-unix.h>
++#include <errno.h>
++#include <signal.h>
+ #include <string.h>
++#include <sys/poll.h>
++#include <sys/wait.h>
++#include <unistd.h>
 +#include <gtk/gtk.h>
  
  #include "vmware.h"
  #include "copyPasteUIWayland.h"
-@@ -50,6 +55,9 @@ extern "C" {
+@@ -43,6 +53,9 @@ extern "C" {
  #include "str.h"
  #include "util.h"
  #include "dndCPMsgV4.h"
@@ -111,7 +114,15 @@ index b4f981b..3f7950b 100644
  }
  
  
-@@ -368,6 +376,501 @@ CopyPasteWaylandRunPaste(const gchar *const *argv,  // IN
+@@ -54,6 +67,7 @@ extern "C" {
+  */
+ #define CP_REQUEST_BUDGET_MS 2000
+ 
++
+ /*
+  *-----------------------------------------------------------------------------
+  *
+@@ -79,6 +93,501 @@ CopyPasteWaylandRemainingMs(gint64 deadline)   // IN: monotonic, microseconds
  }
  
  
@@ -142,12 +153,11 @@ index b4f981b..3f7950b 100644
 + *    Open an X connection to read the selection with, where the compositor
 + *    has no ext-data-control-v1.
 + *
-+ *    wl-paste has no data control protocol on GNOME, and maps a small window
-+ *    to be given focus for each read. The window shows in the dock and takes
-+ *    the focus for a moment. Mutter keeps the X CLIPBOARD selection in step
-+ *    with the Wayland one and answers any X client for it, focused or not,
-+ *    so reading there needs no mapped window. An unmapped InputOnly window
-+ *    receives the data.
++ *    GNOME has no data control protocol, and a core Wayland client reads the
++ *    selection only while it has the keyboard focus. Mutter keeps the X
++ *    CLIPBOARD selection in step with the Wayland one and answers any X
++ *    client for it, focused or not, so reading there needs no mapped window.
++ *    An unmapped InputOnly window receives the data.
 + *
 + * Results:
 + *    True if the connection is open.
@@ -204,9 +214,9 @@ index b4f981b..3f7950b 100644
 + *
 + * CopyPasteXReaderUsable --
 + *
-+ *    Whether a read should go through X. Not when the X selection has no
-+ *    owner, which is also how it looks under a compositor that does not keep
-+ *    it in step with the Wayland one. wl-paste reads then.
++ *    Whether a read can go through X. Not when the X selection has no owner,
++ *    which is also how it looks under a compositor that does not keep it in
++ *    step with the Wayland one. Copy and paste then has nothing to read.
 + *
 + *-----------------------------------------------------------------------------
 + */
@@ -280,7 +290,7 @@ index b4f981b..3f7950b 100644
 + *
 + *    Convert the selection to target and return the bytes, following INCR
 + *    for large ones. For a 32-bit format the items come back as longs, as
-+ *    Xlib stores them. Stops at the V3 size ceiling, as the wl-paste path
++ *    Xlib stores them. Stops at the V3 size ceiling, as the data control path
 + *    does.
 + *
 + * Results:
@@ -487,11 +497,12 @@ index b4f981b..3f7950b 100644
 + *    Own the X CLIPBOARD selection through GDK and offer every item on it,
 + *    where the compositor has no ext-data-control-v1.
 + *
-+ *    wl-copy maps a window on GNOME that shows in the dock, takes the focus
-+ *    and can take a Ctrl+V meant for the application, and it serves one type
-+ *    per selection. Mutter makes the X selection the Wayland selection, with
-+ *    every type the X owner offers, and asks the owner for the data when a
-+ *    Wayland client pastes. An X client needs no focus to own the selection.
++ *    On GNOME a Wayland client sets the selection only from a window with the
++ *    keyboard focus, which shows in the dock, takes the focus and can take a
++ *    Ctrl+V meant for the application. Mutter makes the X selection the
++ *    Wayland selection, with every type the X owner offers, and asks the
++ *    owner for the data when a Wayland client pastes. An X client needs no
++ *    focus to own the selection.
 + *
 + *    GDK copies the data and serves it from the main loop until the
 + *    selection is replaced, cleared or taken by another client. GDK on X11
@@ -613,18 +624,18 @@ index b4f981b..3f7950b 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -405,6 +908,10 @@ CopyPasteWaylandHasType(const gchar *mimeType,  // IN
+@@ -97,6 +606,10 @@ CopyPasteWaylandHasType(const gchar *mimeType,  // IN
+    if (WaylandClipboard_IsAvailable()) {
        return WaylandClipboard_HasType(mimeType);
     }
- 
++
 +   if (CopyPasteXReaderUsable()) {
 +      return CopyPasteXReaderHasType(mimeType, deadline);
 +   }
-+
-    const gchar *argv[] = { "wl-paste", "--list-types", NULL };
-    gsize len = 0;
-    gchar *out = (gchar *) CopyPasteWaylandRunPaste(argv, deadline, &len);
-@@ -456,6 +963,20 @@ CopyPasteWaylandGetData(const gchar *mimeType,  // IN
+    return false;
+ }
+ 
+@@ -129,6 +642,20 @@ CopyPasteWaylandGetData(const gchar *mimeType,  // IN
        return (guchar *) d;
     }
  
@@ -642,19 +653,10 @@ index b4f981b..3f7950b 100644
 +      return d;
 +   }
 +
-    const gchar *argv[] = {
-       "wl-paste", "--no-newline", "--type", mimeType, NULL
-    };
-@@ -492,7 +1013,7 @@ CopyPasteWaylandGetText(gsize *outLen,   // OUT
- 
-    *outLen = 0;
- 
--   if (!WaylandClipboard_IsAvailable()) {
-+   if (!WaylandClipboard_IsAvailable() && !CopyPasteXReaderUsable()) {
-       /*
-        * wl-paste picks a text type itself. One run instead of a type
-        * listing and a read also maps its window only once on GNOME.
-@@ -537,6 +1058,10 @@ CopyPasteWaylandGetText(gsize *outLen,   // OUT
+    if (outLen != NULL) {
+       *outLen = 0;
+    }
+@@ -193,6 +720,10 @@ CopyPasteWaylandGetText(gsize *outLen,   // OUT
  CopyPasteUIWayland::CopyPasteUIWayland()
   : mCP(NULL),
     mInited(false),
@@ -665,7 +667,7 @@ index b4f981b..3f7950b 100644
     mReadGeneration(G_MAXUINT64),
     mRetriedGeneration(G_MAXUINT64)
  {
-@@ -560,6 +1085,16 @@ CopyPasteUIWayland::CopyPasteUIWayland()
+@@ -216,6 +747,16 @@ CopyPasteUIWayland::CopyPasteUIWayland()
  
  CopyPasteUIWayland::~CopyPasteUIWayland()
  {
@@ -682,21 +684,28 @@ index b4f981b..3f7950b 100644
     WaylandClipboard_Exit();
     CPClipboard_Destroy(&mClipboard);
  }
-@@ -587,10 +1122,11 @@ CopyPasteUIWayland::Init()
+@@ -242,13 +783,17 @@ CopyPasteUIWayland::Init()
+ 
     /*
      * Own the selection directly when the compositor implements
-     * ext-data-control-v1. Otherwise, which is the case on GNOME, fall back to
--    * wl-clipboard.
-+    * the X selection, see WatchSelection(), or to wl-clipboard where there is
-+    * no X display.
-     *
-     * This has to happen before the baseline read below, or that read goes
--    * through wl-paste even when the native path is the one in use.
-+    * through X or wl-paste even when the native path is the one in use.
+-    * ext-data-control-v1. This has to happen before the baseline read below.
++    * ext-data-control-v1. Otherwise, which is the case on GNOME, fall back to
++    * the X selection, see WatchSelection().
++    *
++    * This has to happen before the baseline read below, or that read goes
++    * through X even when the native path is the one in use.
      */
     if (WaylandClipboard_Init()) {
        g_debug("%s: using the native Wayland selection\n", __FUNCTION__);
-@@ -611,6 +1147,7 @@ CopyPasteUIWayland::Init()
+    } else {
+-      g_warning("%s: the compositor does not offer ext-data-control-v1, "
+-                "copy and paste is disabled\n", __FUNCTION__);
++      g_debug("%s: ext-data-control-v1 unavailable, using the X selection\n",
++              __FUNCTION__);
+    }
+ 
+    /*
+@@ -256,6 +801,7 @@ CopyPasteUIWayland::Init()
      * pre-existing clipboard looks new and overwrites a newer host clipboard as
      * soon as the VM receives focus.
      */
@@ -704,24 +713,20 @@ index b4f981b..3f7950b 100644
     GetSelectionGeneration(&mReadGeneration);
     gsize len = 0;
     gchar *text = CopyPasteWaylandGetText(&len,
-@@ -618,11 +1155,11 @@ CopyPasteUIWayland::Init()
+@@ -263,6 +809,12 @@ CopyPasteUIWayland::Init()
     mLastClipboardText.assign(text != NULL ? text : "", len);
     g_free(text);
  
--   if (!gHaveWlCopy) {
--      g_warning("%s: the compositor does not offer ext-data-control-v1 and "
--                "wl-copy is not installed. Host to guest copy and paste is "
--                "disabled. Install wl-clipboard to enable it.\n",
--                __FUNCTION__);
-+   if (!gHaveWlCopy && XWriterClipboard() == NULL) {
-+      g_warning("%s: the compositor does not offer ext-data-control-v1, "
-+                "there is no X display and wl-copy is not installed. Host to "
-+                "guest copy and paste is disabled. Install wl-clipboard to "
-+                "enable it.\n", __FUNCTION__);
-    }
- 
++   if (!WaylandClipboard_IsAvailable() && XWriterClipboard() == NULL) {
++      g_warning("%s: the compositor does not offer ext-data-control-v1 and "
++                "there is no X display. Copy and paste is disabled.\n",
++                __FUNCTION__);
++   }
++
     mCP->srcRecvClipChanged.connect(
-@@ -714,7 +1251,8 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+       sigc::mem_fun(this, &CopyPasteUIWayland::GetRemoteClipboardCB));
+    mCP->destRequestClipChanged.connect(
+@@ -352,7 +904,8 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
        }
        DynBuf_Destroy(&serialized);
        if (!current.empty() && current == mLastHostClip &&
@@ -731,18 +736,21 @@ index b4f981b..3f7950b 100644
           g_debug("%s: the guest still offers this host clip; leaving it\n",
                   __FUNCTION__);
           return;
-@@ -797,6 +1335,10 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
-    bool ok;
+@@ -431,9 +984,12 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+    g_debug("%s: offering %d formats locally\n", __FUNCTION__,
+            (int) items.size());
+ 
+-   bool ok = false;
++   bool ok;
     if (WaylandClipboard_IsAvailable()) {
        ok = WaylandClipboard_Offer(&items[0], items.size());
-+   } else if (XWriterClipboard() != NULL &&
-+              CopyPasteXWriterOffer(XWriterClipboard(), &items[0],
-+                                    items.size())) {
-+      ok = true;
-    } else {
-       /*
-        * wl-copy serves one payload. Prefer an image, then plain text, and
-@@ -840,17 +1382,84 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
++   } else {
++      ok = XWriterClipboard() != NULL &&
++           CopyPasteXWriterOffer(XWriterClipboard(), &items[0], items.size());
+    }
+ 
+    if (!ok) {
+@@ -458,17 +1014,85 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
  }
  
  
@@ -789,7 +797,8 @@ index b4f981b..3f7950b 100644
 +#endif
 +   mXReaderOpen = CopyPasteXReaderOpen();
 +   g_debug("%s: reading the selection only after it changes, %s\n",
-+           __FUNCTION__, mXReaderOpen ? "through X" : "with wl-clipboard");
++           __FUNCTION__,
++           mXReaderOpen ? "through X" : "but there is no X display");
 +}
 +
 +
@@ -830,7 +839,7 @@ index b4f981b..3f7950b 100644
   *
   *-----------------------------------------------------------------------------
   */
-@@ -862,6 +1471,10 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
+@@ -480,6 +1104,10 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
        *generation = WaylandClipboard_GetSelectionSerial();
        return true;
     }
@@ -841,18 +850,15 @@ index b4f981b..3f7950b 100644
     return false;
  }
  
-@@ -907,10 +1520,15 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -525,9 +1153,13 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     /*
      * When this client owns the selection, the selection holds what the host
      * sent, so there is nothing new to report. Reading it back would send the
--    * host its own data. A selection installed through wl-copy belongs to
--    * wl-copy, and the content comparisons below catch it.
+-    * host its own data.
 +    * host its own data. On the
 +    * fallback this process owns the X selection after
 +    * CopyPasteXWriterOffer(). GDK answers a read of it from this main loop,
-+    * which the read holds, so the read would also wait out the budget. A
-+    * selection installed through wl-copy belongs to wl-copy, and the content
-+    * comparisons below catch it.
++    * which the read holds, so the read would also wait out the budget.
      */
 -   if (WaylandClipboard_IsOwner()) {
 +   if (WaylandClipboard_IsOwner() ||
@@ -861,27 +867,24 @@ index b4f981b..3f7950b 100644
                __FUNCTION__);
        SendClipNotChanged();
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index c5d5044..1ec1f86 100644
+index 144c81e..9b42842 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
-@@ -21,9 +21,13 @@
+@@ -21,8 +21,11 @@
   *
   * This class implements host<->guest copy/paste (version 3+ of the protocol)
   * for Wayland sessions. The local selection is owned and read through
-- * ext-data-control-v1 where the compositor implements it. Elsewhere, wl-copy
-- * installs it and wl-paste reads it. This is the counterpart of
-- * copyPasteUIX11.h for the Wayland platform.
+- * ext-data-control-v1 where the compositor implements it. This is the
+- * counterpart of copyPasteUIX11.h for the Wayland platform.
 + * ext-data-control-v1 where the compositor implements it. Elsewhere, it is
 + * owned and read on the X CLIPBOARD selection through Xwayland, which the
-+ * compositor keeps in step with the Wayland one. GDK on its X11 backend owns
-+ * it and reports its changes. wl-copy installs the selection when there is
-+ * no X display, and wl-paste reads it then and when the X selection has no
-+ * owner. This is the counterpart of copyPasteUIX11.h for the Wayland
-+ * platform.
++ * compositor keeps in step with the Wayland one, as GNOME does. GDK on its
++ * X11 backend owns it and reports its changes. This is the counterpart of
++ * copyPasteUIX11.h for the Wayland platform.
   *
   * Text, RTF and PNG images are supported.
   */
-@@ -77,7 +81,24 @@ private:
+@@ -76,7 +79,24 @@ private:
     std::string mLastHostClip;
     bool mInited;
  
@@ -894,8 +897,8 @@ index c5d5044..1ec1f86 100644
     bool GetSelectionGeneration(guint64 *generation);
 +   /*
 +    * The clipboard that host clips go on, or NULL where they go through
-+    * data control or wl-copy. Host clips use the X selection wherever reads
-+    * can use it.
++    * data control or there is no X display. Host clips use the X selection
++    * wherever reads can use it.
 +    */
 +   gpointer XWriterClipboard(void)
 +   { return mXReaderOpen ? mWatchedClipboard : NULL; }
@@ -907,23 +910,98 @@ index c5d5044..1ec1f86 100644
     guint64 mReadGeneration;
     /* The generation last read again after its reads ran out of time. */
 diff --git a/services/plugins/dndcp/dndGuestBase/copyPasteDnDWayland.h b/services/plugins/dndcp/dndGuestBase/copyPasteDnDWayland.h
-index 9d89ebc..0041413 100644
+index fc6f211..8818145 100644
 --- a/services/plugins/dndcp/dndGuestBase/copyPasteDnDWayland.h
 +++ b/services/plugins/dndcp/dndGuestBase/copyPasteDnDWayland.h
 @@ -21,9 +21,10 @@
   *
   * Concrete CopyPasteDnDImpl for Wayland sessions. Copy and paste is driven
   * by CopyPasteUIWayland, which owns the Wayland selection through
-- * ext-data-control-v1, or else through wl-copy. Drag and drop is delegated to
-- * DnDUIX11, which runs its detection window under Xwayland. The RPC
-- * transport runs on the toolbox GLib main loop.
-+ * ext-data-control-v1, or else the X selection through GDK, which the
-+ * compositor keeps in step with the Wayland one, or else through wl-copy.
+- * ext-data-control-v1. Drag and drop is delegated to DnDUIX11, which runs its
+- * detection window under Xwayland. The RPC transport runs on the toolbox
+- * GLib main loop.
++ * ext-data-control-v1, or else the X selection through GDK, which GNOME
++ * keeps in step with the Wayland one.
 + * Drag and drop is delegated to DnDUIX11, which runs its detection window
 + * under Xwayland. The RPC transport runs on the toolbox GLib main loop.
   */
  
  #ifndef __COPYPASTEDNDWAYLAND_H__
+diff --git a/services/plugins/dndcp/waylandClipboard/waylandClipboard.c b/services/plugins/dndcp/waylandClipboard/waylandClipboard.c
+index b309d30..46b7f4d 100644
+--- a/services/plugins/dndcp/waylandClipboard/waylandClipboard.c
++++ b/services/plugins/dndcp/waylandClipboard/waylandClipboard.c
+@@ -46,7 +46,8 @@
+ 
+ /*
+  * The host accepts nothing larger than CPCLIPITEM_MAX_SIZE_V3 from
+- * dndClipboard.h, so a larger selection is not worth buffering.
++ * dndClipboard.h, so a larger selection is not worth buffering. The X
++ * selection fallback in copyPasteUIWayland.cpp stops at the same limit.
+  */
+ #include "dndClipboard.h"
+ 
+@@ -405,7 +406,8 @@ DevicePrimarySelection(void *data,                                // IN: unused
+  * DeviceFinished --
+  *
+  *    The compositor has finished with the device, and any further request on
+- *    it is a protocol error. Destroy it and mark the module unavailable.
++ *    it is a protocol error. Destroy it and mark the module unavailable, so
++ *    the callers fall back to the X selection.
+  *
+  *-----------------------------------------------------------------------------
+  */
+@@ -473,7 +475,8 @@ static const struct wl_registry_listener gRegistryListener = {
+  *
+  * Side effects:
+  *    A dead display shuts the module down. IsAvailable() then returns FALSE,
+- *    and the callers stop using a connection that will never answer.
++ *    and the callers use the X selection instead of a connection that will
++ *    never answer.
+  *
+  *-----------------------------------------------------------------------------
+  */
+@@ -514,7 +517,8 @@ DisplayReadable(gint fd,             // IN: unused
+  *    watch the connection from the GLib main loop.
+  *
+  * Results:
+- *    TRUE when the protocol is available, FALSE otherwise.
++ *    TRUE when the protocol is available. FALSE otherwise, and the caller
++ *    then falls back to the X selection.
+  *
+  *-----------------------------------------------------------------------------
+  */
+diff --git a/services/plugins/dndcp/waylandClipboard/waylandClipboard.h b/services/plugins/dndcp/waylandClipboard/waylandClipboard.h
+index 3fd8d7b..a454d69 100644
+--- a/services/plugins/dndcp/waylandClipboard/waylandClipboard.h
++++ b/services/plugins/dndcp/waylandClipboard/waylandClipboard.h
+@@ -22,11 +22,9 @@
+  *    Own and read the Wayland selection directly, through
+  *    ext-data-control-v1.
+  *
+- *    The alternative is to run wl-clipboard. wl-copy takes one --type and
+- *    serves one payload, so the fallback has to pick one format and drops
+- *    the rest, for example the RTF of a rich text copy. A data control
+- *    source can offer several types and answer each request with the bytes
+- *    for that type, as the X11 backend does with multiple selection targets.
++ *    A data control source can offer several types and answer each request
++ *    with the bytes for that type, as the X11 backend does with multiple
++ *    selection targets, and it needs no keyboard focus.
+  */
+ 
+ #ifndef _WAYLAND_CLIPBOARD_H_
+@@ -52,8 +50,9 @@ typedef struct {
+ /*
+  * Connect and bind ext-data-control-v1.
+  *
+- * Returns FALSE when the compositor does not implement the protocol. GNOME is
+- * the main case, since it does not implement data control protocols.
++ * Returns FALSE when the compositor does not implement the protocol, and the
++ * caller then falls back to the X selection. GNOME is the main case, since
++ * it does not implement data control protocols.
+  */
+ gboolean WaylandClipboard_Init(void);
+ void WaylandClipboard_Exit(void);
 -- 
 2.55.0
 

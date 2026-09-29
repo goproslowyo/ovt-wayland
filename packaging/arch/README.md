@@ -12,7 +12,7 @@ and changes these things.
   package. gtkmm-4.0 uses libsigc++ 3, which no longer accepts the
   `signal<R, T...>` syntax in upstream's dndcp headers.
 - `gtkmm-4.0`, `libsigc++-3.0`, `libxtst` and `wayland` become dependencies
-  and `wayland-protocols` a build dependency. `wl-clipboard` is optional.
+  and `wayland-protocols` a build dependency.
 - It provides and conflicts with `open-vm-tools`, so installing it replaces
   the repository package.
 

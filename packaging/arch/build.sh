@@ -45,7 +45,7 @@ bsdtar -xf "$pkg" -C "$tmp" "$so"
 # exits early and strings gets SIGPIPE.
 strings "$tmp/$so" > "$tmp/strings"
 for s in 'unsafe fileItem' 'no XDG_CURRENT_DESKTOP' 'drag entering, telling the host' \
-         'using ext-data-control-v1' 'wl-copy is not installed' \
+         'using ext-data-control-v1' \
          'paste observed, requesting files' 'native drag source ready' \
          'Mutter bridges XDND' 'native drop target shown on' 'PruneStagingDirectories'; do
     grep -qF "$s" "$tmp/strings" || { echo "ERROR: plugin lacks '$s'" >&2; exit 1; }

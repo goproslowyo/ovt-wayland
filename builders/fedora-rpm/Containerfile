@@ -184,7 +184,7 @@ RUN set -eux; \
 
 # Only the patched sources contain these log strings, so a build that lost a
 # patch fails here instead of shipping a stock binary. There is at least one
-# per patch, in patch order, except 0005, which adds only configure and build
+# per patch, in patch order, except 0201, which adds only configure and build
 # rules. The Wayland strings after it cannot be built without that patch.
 RUN set -eux; \
     cd "$(mktemp -d)"; \
@@ -198,7 +198,6 @@ RUN set -eux; \
     strings "$so" | grep -q 'host clip offers'; \
     strings "$so" | grep -q 'the guest still offers this host clip'; \
     strings "$so" | grep -q 'clipboard text too large'; \
-    strings "$so" | grep -q 'wl-copy is not installed'; \
     strings "$so" | grep -q 'reading the selection only after it changes'; \
     strings "$so" | grep -q 'skipping non-file uri'; \
     strings "$so" | grep -q 'paste observed, requesting files'; \

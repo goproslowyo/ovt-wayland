@@ -121,9 +121,6 @@ The release tarball is unpacked into the same place.
   `libgtkmm-4.0-dev` and `libgtk-4-dev`, and adds `libwayland-dev` and
   `wayland-protocols (>= 1.39)`. ext-data-control-v1 first appeared in
   wayland-protocols 1.39.
-- `open-vm-tools-desktop` recommends `wl-clipboard`. The plugin runs
-  `wl-copy` and `wl-paste` on a compositor without ext-data-control-v1 and
-  without an X display.
 - `dh_installchangelogs` no longer names `ReleaseNotes.md`, which is in the
   git repository but not in the release tarball.
 - A new changelog entry sets the version.
