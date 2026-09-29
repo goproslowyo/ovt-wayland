@@ -353,6 +353,9 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      # For packaging/release-notes.sh and targets.json.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
       # One directory per artifact, so two builders that produce the same
       # file name fail the check below instead of overwriting each other.
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -402,6 +405,9 @@ jobs:
           RPMS_RESULT: ${{ needs.rpms.result }}
           DEBS_RESULT: ${{ needs.debs.result }}
           ARCH_RESULT: ${{ needs.arch.result }}
+          IMAGE_SUFFIX: ${{ vars.IMAGE_SUFFIX }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
         run: |
           cd assets
           ver="$(printf '%s\n' open-vm-tools-[0-9]*.x86_64.rpm |
@@ -412,18 +418,9 @@ jobs:
           }
           day="$(date -u +%Y%m%d)"
           tag="v$ver-$day"
-          {
-            echo "open-vm-tools $ver with the Wayland patches. Built from"
-            echo "$GITHUB_SHA."
-            echo
-            echo "The README says which file to download and how to install it."
-            [ "$RPMS_RESULT" = success ] ||
-              printf '\nSome Fedora RPMs did not build in this run and are missing.\n'
-            [ "$DEBS_RESULT" = success ] ||
-              printf '\nSome Debian and Ubuntu .debs did not build in this run and are missing.\n'
-            [ "$ARCH_RESULT" = success ] ||
-              printf '\nThe Arch package did not build in this run and is missing.\n'
-          } > ../notes
+          (cd .. && VERSION="$ver" TAG="$tag" \
+             packaging/release-notes.sh assets) > ../notes
+          cat ../notes
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload --clobber "$tag" ./*
             gh release view "$tag" --json assets --jq '.assets[].name' |

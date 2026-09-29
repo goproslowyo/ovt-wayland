@@ -49,6 +49,14 @@ A target that fails does not hold back the rest. The release goes out with the
 packages that built, and its notes say which kinds are missing. A second run
 on the same day replaces that day's assets and removes any it did not build.
 
+`packaging/release-notes.sh` writes the release notes from the files the
+release carries. They list each package with its download link, grouped by
+distribution, with the install commands, the images and how to verify them.
+To see the notes for a directory of packages, run it from the repository
+root with `VERSION`, `TAG`, `REPO` and `SHA` set. Both the images and every
+release file get a build provenance attestation, see
+[Verifying signatures](signatures.md#build-attestations).
+
 ## Local builds
 
 The build is split in two. `builders/fedora-rpm/Containerfile` rebuilds
