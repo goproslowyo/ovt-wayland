@@ -226,11 +226,13 @@ managed after
 native drag source ready
 drag started from serial
 formats natively
+from the %s, was
 placeholders under
 never agreed
 Mutter bridges XDND
 outlived the drop
 native drop target shown on
+onto the native drop target
 PruneStagingDirectories
 EOF
     test "$fail" = 0

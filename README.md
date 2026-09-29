@@ -28,7 +28,7 @@ G is the guest and H is the host.
 | GNOME 50.3 (Mutter) | text and files tested | text, files and images tested | works, XDND | files and text tested |
 | Xfce 4.20 on Xorg | works, text and files | works, text and files | works | works |
 | COSMIC 1.8 | works, text and files | works, text and files | works, native | works, XDND |
-| niri 26.04 | works, text tested | works, text tested | works, native | native, tested without the host |
+| niri 26.04 | works, text tested | works, text tested | works, native | works, native |
 
 How each row was tested:
 
@@ -57,6 +57,11 @@ How each row was tested:
   `open-vm-tools` loses file pastes and host file drags there, since it
   offers file lists only on GNOME and KDE and blocks the files before Thunar
   can check them.
+- niri. niri 26.04 on Fedora 45 COSMIC Atomic with COSMIC Files, by hand.
+  File drags in both directions against the host. The pointer sizing from
+  the Wayland output was also tested without the host, through mode changes
+  and a rotated output. See the known limits for a niri setting that affects
+  drags.
 - A compositor started from a text console, where `XDG_SESSION_TYPE` is `tty`.
   vmusr was started on sway with that value, and chose the Wayland backend
   and got the uinput device.
@@ -92,8 +97,8 @@ Tested: Plasma 6.7.5, sway 1.11, GNOME 50.3, COSMIC 1.8 and Xfce 4.20 on Xorg,
 all against VMware Workstation Pro 26H1u1 on a Windows 10 host. Their guest to
 host drags went through XDND. Where the compositor has layer shell, guest to
 host drags now use a native drop target first (patch 0021). It was tested with
-the host on Plasma 6.7.5 and sway 1.11, and without the host on niri 26.04,
-where xwayland-satellite cannot carry a drag into X at all. It falls back to
+the host on Plasma 6.7.5, sway 1.11 and niri 26.04, where xwayland-satellite
+cannot carry a drag into X at all. It falls back to
 XDND where nothing reaches it.
 Hyprland 0.56.2 from the `sdegler/hyprland` COPR could not be
 tested, because its Xwayland exits on the first window any X11 client maps,
@@ -218,6 +223,11 @@ sway needs the native path.
   drop target. Sway floats it on its own. Elsewhere, float it in the
   compositor's configuration, for example in sway syntax
   `for_window [title="vmware-user"] floating enable`.
+- On niri, turn off scrolling at the screen edges during a drag, with
+  `gestures { dnd-edge-view-scroll { trigger-width 0; }; }`. The guest pointer
+  stays at the edge a guest to host drag left from, and niri scrolls the view
+  until the drop. With the scrolling on, the host sometimes treated the drag
+  as back in the guest and kept the pointer in the VM window.
 
 ## Patches
 

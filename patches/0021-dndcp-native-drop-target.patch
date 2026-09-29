@@ -44,18 +44,18 @@ host were tested by hand on Plasma 6.7.5 and sway 1.11. On Plasma the
 host kept the button down after the drop, and Escape cancelled the
 guest drag.
 ---
- .../plugins/dndcp/dndGuestBase/dndUIX11GTK4.h |  40 +
- services/plugins/dndcp/dndUIX11GTK4.cpp       | 495 +++++++++-
+ .../plugins/dndcp/dndGuestBase/dndUIX11GTK4.h |  41 +
+ services/plugins/dndcp/dndUIX11GTK4.cpp       | 537 ++++++++++-
  .../plugins/dndcp/waylandDrag/waylandDrag.c   | 861 +++++++++++++++++-
  .../plugins/dndcp/waylandDrag/waylandDrag.h   | 110 ++-
  .../dndcp/waylandDrag/waylandDragStub.c       |  68 +-
- 5 files changed, 1544 insertions(+), 30 deletions(-)
+ 5 files changed, 1587 insertions(+), 30 deletions(-)
 
 diff --git a/services/plugins/dndcp/dndGuestBase/dndUIX11GTK4.h b/services/plugins/dndcp/dndGuestBase/dndUIX11GTK4.h
-index 18f7756..36739b1 100644
+index 18f7756..ee65db6 100644
 --- a/services/plugins/dndcp/dndGuestBase/dndUIX11GTK4.h
 +++ b/services/plugins/dndcp/dndGuestBase/dndUIX11GTK4.h
-@@ -180,6 +180,19 @@ private:
+@@ -180,6 +180,20 @@ private:
        unsigned int gen;
     } WaylandDragTicket;
  
@@ -66,6 +66,7 @@ index 18f7756..36739b1 100644
 +   bool LocalShowNativeDropTarget(int32 x, int32 y);
 +   void LocalHideNativeDropTarget(bool keepHeldDrag);
 +   void LocalNudgeNativeDropTarget(int32 x, int32 y);
++   static gboolean OnNativeDropShown(gpointer ctx);
 +   static gboolean OnNativeDropNudge(gpointer ctx);
 +   static void OnNativeDropData(const char *mimeType, const char *data,
 +                                size_t size, void *ctx);
@@ -75,7 +76,7 @@ index 18f7756..36739b1 100644
     /*
      * Gtk+ Callbacks: Drag Source
      */
-@@ -200,6 +213,7 @@ private:
+@@ -200,6 +214,7 @@ private:
      * Target function for GH DnD. Makes call to common layer.
      */
     void TargetDragEnter();
@@ -83,7 +84,7 @@ index 18f7756..36739b1 100644
  
     /*
      * Misc methods.
-@@ -284,6 +298,32 @@ private:
+@@ -284,6 +299,32 @@ private:
     bool mWaylandDragActive;
     /* Which native drag is current; a done() for any other is ignored. */
     unsigned int mWaylandDragGen;
@@ -117,7 +118,7 @@ index 18f7756..36739b1 100644
     bool mHGDeferBlock;
     DND_DROPEFFECT mEffect;
 diff --git a/services/plugins/dndcp/dndUIX11GTK4.cpp b/services/plugins/dndcp/dndUIX11GTK4.cpp
-index a61ba66..8307284 100644
+index a61ba66..7e15981 100644
 --- a/services/plugins/dndcp/dndUIX11GTK4.cpp
 +++ b/services/plugins/dndcp/dndUIX11GTK4.cpp
 @@ -131,6 +131,14 @@ extern "C" {
@@ -193,7 +194,7 @@ index a61ba66..8307284 100644
     if (mHGXdndWaitBegin) {
        /* LocalXdndLeaveDetWnd() moves the pointer here once GTK is ready. */
        return;
-@@ -1894,6 +1932,322 @@ DnDUIX11::OnSrcCancel()
+@@ -1894,6 +1932,364 @@ DnDUIX11::OnSrcCancel()
  /* Source functions for GH DnD. */
  
  
@@ -265,7 +266,17 @@ index a61ba66..8307284 100644
 +           __FUNCTION__, x, y);
 +   mGHNativeExitX = x;
 +   mGHNativeExitY = y;
-+   LocalNudgeNativeDropTarget(x, y);
++   /*
++    * Move the pointer from the main loop. The host also asks for the
++    * detection window, at (0, 0), when a host to guest drag begins, and
++    * OnSrcDragBegin() hides the drop target again before control returns
++    * to the main loop, which cancels this. Moving now would take the
++    * pointer to the top-left corner, where niri opens its overview.
++    */
++   if (mGHNativeNudgeTimer != 0) {
++      g_source_remove(mGHNativeNudgeTimer);
++   }
++   mGHNativeNudgeTimer = g_idle_add(OnNativeDropShown, this);
 +   return true;
 +#else
 +   return false;
@@ -348,6 +359,8 @@ index a61ba66..8307284 100644
 +                                     int32 y)   // IN: pointer y-coord
 +{
 +#ifdef USE_UINPUT
++   /* The host's coordinates are for the screen as it is now. */
++   mDetWnd->RefreshScreenSize();
 +   mGHNativeX = x;
 +   mGHNativeY = y;
 +   FakeMouse_Move(x > 0 ? x - 1 : x + 1, y);
@@ -359,6 +372,36 @@ index a61ba66..8307284 100644
 +   mGHNativeNudgeTimer = g_timeout_add(GH_NATIVE_NUDGE_MS, OnNativeDropNudge,
 +                                       this);
 +#endif
++}
++
++
++/*
++ *-----------------------------------------------------------------------------
++ *
++ * DnDUIX11::OnNativeDropShown --
++ *
++ *      The first move after LocalShowNativeDropTarget() maps the drop
++ *      target. LocalHideNativeDropTarget() removes it when the drop target
++ *      goes before this runs.
++ *
++ * Results:
++ *      G_SOURCE_REMOVE.
++ *
++ *-----------------------------------------------------------------------------
++ */
++
++gboolean
++DnDUIX11::OnNativeDropShown(gpointer ctx)   // IN: the DnDUIX11
++{
++   DnDUIX11 *ui = static_cast<DnDUIX11 *>(ctx);
++
++   ui->mGHNativeNudgeTimer = 0;
++   if (ui->mGHNative) {
++      g_debug("%s: moving the pointer onto the native drop target\n",
++              __FUNCTION__);
++      ui->LocalNudgeNativeDropTarget(ui->mGHNativeExitX, ui->mGHNativeExitY);
++   }
++   return G_SOURCE_REMOVE;
 +}
 +
 +
@@ -516,7 +559,7 @@ index a61ba66..8307284 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -1916,7 +2270,16 @@ DnDUIX11::OnPrivateDrop(int32 x,        // UNUSED
+@@ -1916,7 +2312,16 @@ DnDUIX11::OnPrivateDrop(int32 x,        // UNUSED
  {
     TRACE_CALL();
  
@@ -534,7 +577,7 @@ index a61ba66..8307284 100644
  
        /*
         * Release the mouse button.
-@@ -1951,7 +2314,27 @@ DnDUIX11::OnDestCancel()
+@@ -1951,7 +2356,27 @@ DnDUIX11::OnDestCancel()
  {
     TRACE_CALL();
  
@@ -563,7 +606,7 @@ index a61ba66..8307284 100644
        Glib::RefPtr<Gdk::Display> display = Gdk::Display::get_default();
        GdkSurface *gdkSurface = gdk_x11_display_get_default_group(display->gobj());
        UpdateWorkArea();
-@@ -2005,6 +2388,10 @@ DnDUIX11::OnDestCancel()
+@@ -2005,6 +2430,10 @@ DnDUIX11::OnDestCancel()
   *      the window, and has not dropped, is still running, and Escape then
   *      goes to the drag rather than to an application.
   *
@@ -574,7 +617,7 @@ index a61ba66..8307284 100644
   * Results:
   *      G_SOURCE_REMOVE.
   *
-@@ -2021,6 +2408,20 @@ DnDUIX11::OnGHDropCheck(gpointer ctx)   // IN: the DnDUIX11
+@@ -2021,6 +2450,20 @@ DnDUIX11::OnGHDropCheck(gpointer ctx)   // IN: the DnDUIX11
  
     ui->mGHDropCheckTimer = 0;
  #ifdef USE_UINPUT
@@ -595,7 +638,7 @@ index a61ba66..8307284 100644
     /* A host to guest drag may have started since, over its own window. */
     if (ui->mDetWnd != NULL && !ui->mInHGDrag && !ui->mHGButtonDown &&
         ui->mDetWnd->Get_Current_Drop_ctx() != 0 &&
-@@ -2323,6 +2724,21 @@ DnDUIX11::ShowDetWnd(bool show,      // IN: show (true) or hide (false)
+@@ -2323,6 +2766,21 @@ DnDUIX11::ShowDetWnd(bool show,      // IN: show (true) or hide (false)
             __FUNCTION__,
             mDetWnd->Get_Current_Drop_ctx(), show, x, y, role);
  
@@ -617,7 +660,7 @@ index a61ba66..8307284 100644
     /* If the window is being shown, move it to the right place. */
     if (show) {
        UpdateWorkArea();
-@@ -2406,6 +2822,15 @@ DnDUIX11::OnUpdateDetWnd(bool show,     // IN: show (true) or hide (false)
+@@ -2406,6 +2864,15 @@ DnDUIX11::OnUpdateDetWnd(bool show,     // IN: show (true) or hide (false)
  void
  DnDUIX11::OnDestMoveDetWndToMousePos()
  {
@@ -633,7 +676,7 @@ index a61ba66..8307284 100644
     mDetWnd->RefreshScreenSize();
     mDetWnd->SimulateXEvents(true, false, true, true, false, 0, 0);
  }
-@@ -2985,6 +3410,44 @@ DnDUIX11::OnGHDropRead(const char *data,   // IN
+@@ -2985,6 +3452,44 @@ DnDUIX11::OnGHDropRead(const char *data,   // IN
  }
  
  
@@ -678,7 +721,7 @@ index a61ba66..8307284 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -3018,26 +3481,7 @@ DnDUIX11::OnGtkDragAccept(const Glib::RefPtr< Gdk::Drop > &drop, void *ctx)
+@@ -3018,26 +3523,7 @@ DnDUIX11::OnGtkDragAccept(const Glib::RefPtr< Gdk::Drop > &drop, void *ctx)
        return false;
     }
  
@@ -706,7 +749,7 @@ index a61ba66..8307284 100644
  
     /*
      * Fetch the data here rather than through GTK's preload, which picks the
-@@ -3671,8 +4115,13 @@ DnDUIX11::TargetDragEnter()
+@@ -3671,8 +4157,13 @@ DnDUIX11::TargetDragEnter()
     /*
      * Show the window, and position it under the current mouse position.
      * This is particularly important for KDE 3.5 guests.
@@ -722,7 +765,7 @@ index a61ba66..8307284 100644
  
  
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.c b/services/plugins/dndcp/waylandDrag/waylandDrag.c
-index 285df99..dc03861 100644
+index 993773d..af8afeb 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDrag.c
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.c
 @@ -19,7 +19,8 @@
@@ -781,7 +824,7 @@ index 285df99..dc03861 100644
  
  typedef struct {
     char *mimeType;
-@@ -191,6 +217,48 @@ static struct {
+@@ -195,6 +221,48 @@ static struct {
     /* Fires if the target never finishes a drop it was given. */
     guint finishTimer;
     gboolean inited;
@@ -830,7 +873,7 @@ index 285df99..dc03861 100644
  } gDrag;
  
  /*
-@@ -202,6 +270,7 @@ static gboolean gUnsupported;
+@@ -206,6 +274,7 @@ static gboolean gUnsupported;
  
  
  static void Finish(void);
@@ -838,7 +881,7 @@ index 285df99..dc03861 100644
  
  
  /*
-@@ -681,6 +750,488 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
+@@ -685,6 +754,488 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
  }
  
  
@@ -1327,7 +1370,7 @@ index 285df99..dc03861 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -689,6 +1240,9 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
+@@ -693,6 +1244,9 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
   *
   *    The drag as this client's own data device sees it.
   *
@@ -1337,7 +1380,7 @@ index 285df99..dc03861 100644
   *    The compositor must stop offering the drag to the overlay as soon as
   *    HideOverlays() runs. These data device events are the only way to see
   *    that, because the rest of this module sees only the source's side of
-@@ -712,17 +1266,23 @@ DeviceDataOffer(void *d,                    // IN: unused
+@@ -716,17 +1270,23 @@ DeviceDataOffer(void *d,                    // IN: unused
      */
     OfferDestroy(gDrag.offer);
     gDrag.offer = o;
@@ -1363,7 +1406,7 @@ index 285df99..dc03861 100644
     DragIsReal();
     gDrag.overlayEntered = TRUE;
     g_debug("%s: the overlay was offered the drag\n", __FUNCTION__);
-@@ -732,6 +1292,10 @@ static void
+@@ -736,6 +1296,10 @@ static void
  DeviceLeave(void *d,                    // IN: unused
              struct wl_data_device *dd)  // IN: unused
  {
@@ -1374,7 +1417,7 @@ index 285df99..dc03861 100644
     g_debug("%s: the drag left the overlay\n", __FUNCTION__);
     gDrag.overlayEntered = FALSE;
     OfferDestroy(gDrag.offer);
-@@ -745,12 +1309,19 @@ DeviceMotion(void *d,                    // IN: unused
+@@ -749,12 +1313,19 @@ DeviceMotion(void *d,                    // IN: unused
               wl_fixed_t x,               // IN: unused
               wl_fixed_t y)               // IN: unused
  {
@@ -1394,7 +1437,7 @@ index 285df99..dc03861 100644
     g_warning("%s: the overlay took the drop meant for the target\n",
               __FUNCTION__);
  }
-@@ -1003,6 +1574,23 @@ PointerEnter(void *data,                  // IN: unused
+@@ -1007,6 +1578,23 @@ PointerEnter(void *data,                  // IN: unused
               wl_fixed_t y)                // IN: unused
  {
     gDrag.focus = surface;
@@ -1418,7 +1461,7 @@ index 285df99..dc03861 100644
  }
  
  
-@@ -1049,6 +1637,13 @@ PointerButton(void *data,                 // IN: unused
+@@ -1053,6 +1641,13 @@ PointerButton(void *data,                 // IN: unused
  {
     size_t i;
  
@@ -1432,7 +1475,7 @@ index 285df99..dc03861 100644
     if (state != WL_POINTER_BUTTON_STATE_PRESSED ||
         gDrag.dragging || gDrag.focus == NULL || gDrag.source != NULL) {
        return;
-@@ -1519,6 +2114,7 @@ Disconnect(void)
+@@ -1583,6 +2178,7 @@ Disconnect(void)
     DestroyProxy(gDrag.registry);
     wl_display_disconnect(gDrag.display);
     memset(&gDrag, 0, sizeof gDrag);
@@ -1440,7 +1483,7 @@ index 285df99..dc03861 100644
  }
  
  
-@@ -1560,6 +2156,7 @@ WaylandDrag_Init(void)
+@@ -1624,6 +2220,7 @@ WaylandDrag_Init(void)
        return FALSE;
     }
     memset(&gDrag, 0, sizeof gDrag);
@@ -1448,7 +1491,7 @@ index 285df99..dc03861 100644
  
     gDrag.display = wl_display_connect(name);
     if (gDrag.display == NULL) {
-@@ -1667,6 +2264,8 @@ WaylandDrag_Exit(void)
+@@ -1731,6 +2328,8 @@ WaylandDrag_Exit(void)
     }
     OfferDestroy(gDrag.offer);
     gDrag.offer = NULL;
@@ -1457,7 +1500,7 @@ index 285df99..dc03861 100644
     FreeItems();
     Disconnect();
  
-@@ -1725,6 +2324,11 @@ WaylandDrag_Arm(const WaylandDragItem *items,  // IN
+@@ -1834,6 +2433,11 @@ WaylandDrag_Arm(const WaylandDragItem *items,  // IN
        g_debug("%s: a drag is already running\n", __FUNCTION__);
        return FALSE;
     }
@@ -1469,7 +1512,7 @@ index 285df99..dc03861 100644
     WaylandDrag_Disarm();
  
     /*
-@@ -2132,7 +2736,11 @@ WaylandDrag_Refocus(unsigned int timeoutMs,        // IN
+@@ -2241,7 +2845,11 @@ WaylandDrag_Refocus(unsigned int timeoutMs,        // IN
  void
  WaylandDrag_Disarm(void)
  {
@@ -1482,7 +1525,7 @@ index 285df99..dc03861 100644
        return;
     }
     gDrag.done = NULL;
-@@ -2174,3 +2782,248 @@ WaylandDrag_Cancel(void)
+@@ -2283,3 +2891,248 @@ WaylandDrag_Cancel(void)
     g_debug("%s: ending the drag\n", __FUNCTION__);
     Finish();
  }
@@ -1732,7 +1775,7 @@ index 285df99..dc03861 100644
 +   return TRUE;
 +}
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.h b/services/plugins/dndcp/waylandDrag/waylandDrag.h
-index 455a90d..c89e751 100644
+index 7c158d9..0e050ef 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDrag.h
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.h
 @@ -19,7 +19,8 @@
@@ -1745,7 +1788,7 @@ index 455a90d..c89e751 100644
   *
   *    The detection window is a GTK window on the x11 backend, which GDK is
   *    pinned to process wide, so a host to guest drag is an XDND drag from an
-@@ -123,6 +124,113 @@ void WaylandDrag_Disarm(void);
+@@ -130,6 +131,113 @@ void WaylandDrag_Disarm(void);
   */
  void WaylandDrag_Cancel(void);
  
@@ -1860,7 +1903,7 @@ index 455a90d..c89e751 100644
  }
  #endif
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDragStub.c b/services/plugins/dndcp/waylandDrag/waylandDragStub.c
-index 090c916..0bb36c5 100644
+index 200e0dc..23d8bc7 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDragStub.c
 +++ b/services/plugins/dndcp/waylandDrag/waylandDragStub.c
 @@ -19,8 +19,8 @@
@@ -1874,7 +1917,7 @@ index 090c916..0bb36c5 100644
   */
  
  #include "waylandDrag.h"
-@@ -95,3 +95,67 @@ void
+@@ -103,3 +103,67 @@ void
  WaylandDrag_Cancel(void)
  {
  }

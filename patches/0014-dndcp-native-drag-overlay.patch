@@ -48,10 +48,10 @@ so the xdg-shell interface code is generated too. The next patch starts
 the drag, and the one after it uses the module.
 ---
  services/plugins/dndcp/Makefile.am            |  24 +-
- .../plugins/dndcp/waylandDrag/waylandDrag.c   | 889 ++++++++++++++++++
- .../plugins/dndcp/waylandDrag/waylandDrag.h   |  86 ++
- .../wlr-layer-shell-unstable-v1.xml           | 407 ++++++++
- 4 files changed, 1405 insertions(+), 1 deletion(-)
+ .../plugins/dndcp/waylandDrag/waylandDrag.c   | 998 ++++++++++++++++++
+ .../plugins/dndcp/waylandDrag/waylandDrag.h   |  93 ++
+ .../wlr-layer-shell-unstable-v1.xml           | 407 +++++++
+ 4 files changed, 1521 insertions(+), 1 deletion(-)
  create mode 100644 services/plugins/dndcp/waylandDrag/waylandDrag.c
  create mode 100644 services/plugins/dndcp/waylandDrag/waylandDrag.h
  create mode 100644 services/plugins/dndcp/waylandDrag/wlr-layer-shell-unstable-v1.xml
@@ -119,10 +119,10 @@ index db239eb..8ab6c68 100644
 +EXTRA_DIST = waylandDrag/wlr-layer-shell-unstable-v1.xml
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.c b/services/plugins/dndcp/waylandDrag/waylandDrag.c
 new file mode 100644
-index 0000000..e4da978
+index 0000000..4114a5d
 --- /dev/null
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.c
-@@ -0,0 +1,889 @@
+@@ -0,0 +1,998 @@
 +/*********************************************************
 + * Copyright (C) 2026 GoProSlowYo
 + *
@@ -208,6 +208,10 @@ index 0000000..e4da978
 +   struct wl_buffer *buffer;
 +   int width;
 +   int height;
++   /* The output's current mode, in pixels, and its transform. */
++   int modeWidth;
++   int modeHeight;
++   int32_t transform;
 +} DragOverlay;
 +
 +static struct {
@@ -584,6 +588,61 @@ index 0000000..e4da978
 +};
 +
 +
++/*
++ *-----------------------------------------------------------------------------
++ *
++ * OutputGeometry --
++ * OutputMode --
++ *
++ *    Record an output's transform and current mode. The host gives pointer
++ *    positions in pixels of the guest's screen, and with one output that is
++ *    this mode. See WaylandDrag_GetOutputSize().
++ *
++ *-----------------------------------------------------------------------------
++ */
++
++static void
++OutputGeometry(void *data,                // IN: the DragOverlay
++               struct wl_output *output,  // IN: unused
++               int32_t x,                 // IN: unused
++               int32_t y,                 // IN: unused
++               int32_t physicalWidth,     // IN: unused
++               int32_t physicalHeight,    // IN: unused
++               int32_t subpixel,          // IN: unused
++               const char *make,          // IN: unused
++               const char *model,         // IN: unused
++               int32_t transform)         // IN
++{
++   DragOverlay *o = data;
++
++   o->transform = transform;
++}
++
++
++static void
++OutputMode(void *data,                // IN: the DragOverlay
++           struct wl_output *output,  // IN: unused
++           uint32_t flags,            // IN
++           int32_t width,             // IN
++           int32_t height,            // IN
++           int32_t refresh)           // IN: unused
++{
++   DragOverlay *o = data;
++
++   if ((flags & WL_OUTPUT_MODE_CURRENT) != 0) {
++      o->modeWidth = width;
++      o->modeHeight = height;
++   }
++}
++
++
++/* Version 1 of wl_output sends only these two events. */
++static const struct wl_output_listener gOutputListener = {
++   .geometry = OutputGeometry,
++   .mode = OutputMode,
++};
++
++
 +static void
 +RegistryGlobal(void *data,                    // IN: unused
 +               struct wl_registry *registry,  // IN
@@ -615,6 +674,7 @@ index 0000000..e4da978
 +
 +      o->name = name;
 +      o->output = wl_registry_bind(registry, name, &wl_output_interface, 1);
++      wl_output_add_listener(o->output, &gOutputListener, o);
 +   }
 +}
 +
@@ -656,13 +716,17 @@ index 0000000..e4da978
 +      gDrag.overlays[i] = gDrag.overlays[--gDrag.nOverlays];
 +      memset(&gDrag.overlays[gDrag.nOverlays], 0, sizeof *o);
 +      /*
-+       * The layer surface listener of the moved entry has the address of the
-+       * slot it came from, which has just been cleared. Point it at the new
-+       * slot. No other listener holds a pointer into gDrag.overlays.
++       * The output and layer surface listeners of the moved entry have the
++       * address of the slot it came from, which has just been cleared. Point
++       * them at the new slot. No other listener holds a pointer into
++       * gDrag.overlays.
 +       */
-+      if (i < gDrag.nOverlays && gDrag.overlays[i].layer != NULL) {
-+         zwlr_layer_surface_v1_set_user_data(gDrag.overlays[i].layer,
-+                                             &gDrag.overlays[i]);
++      if (i < gDrag.nOverlays) {
++         wl_output_set_user_data(gDrag.overlays[i].output, &gDrag.overlays[i]);
++         if (gDrag.overlays[i].layer != NULL) {
++            zwlr_layer_surface_v1_set_user_data(gDrag.overlays[i].layer,
++                                                &gDrag.overlays[i]);
++         }
 +      }
 +      return;
 +   }
@@ -899,6 +963,51 @@ index 0000000..e4da978
 +/*
 + *-----------------------------------------------------------------------------
 + *
++ * WaylandDrag_GetOutputSize --
++ *
++ *    The size of the only output, in pixels, after its transform.
++ *
++ *    The uinput pointer declares an absolute range that the compositor
++ *    stretches over the output, so the range must be the size the host's
++ *    coordinates are in. The X screen is not a reliable source for it under
++ *    Wayland. xwayland-satellite, which niri runs, keeps its own screen size,
++ *    and Xwayland reports a scaled output in logical pixels.
++ *
++ * Results:
++ *    FALSE without a connection, before the compositor has sent a mode, or
++ *    with more than one output, where the caller keeps its X screen size.
++ *
++ *-----------------------------------------------------------------------------
++ */
++
++gboolean
++WaylandDrag_GetOutputSize(int *width,   // OUT
++                          int *height)  // OUT
++{
++   const DragOverlay *o;
++
++   if (!gDrag.inited || gDrag.nOverlays != 1) {
++      return FALSE;
++   }
++   o = &gDrag.overlays[0];
++   if (o->modeWidth <= 0 || o->modeHeight <= 0) {
++      return FALSE;
++   }
++   /* 90 and 270 degrees, flipped or not, are the odd transforms. */
++   if ((o->transform & 1) != 0) {
++      *width = o->modeHeight;
++      *height = o->modeWidth;
++   } else {
++      *width = o->modeWidth;
++      *height = o->modeHeight;
++   }
++   return TRUE;
++}
++
++
++/*
++ *-----------------------------------------------------------------------------
++ *
 + * WaylandDrag_Arm --
 + *
 + *    Offer these formats and map a transparent overlay on every output, so
@@ -1014,10 +1123,10 @@ index 0000000..e4da978
 +
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.h b/services/plugins/dndcp/waylandDrag/waylandDrag.h
 new file mode 100644
-index 0000000..8bd1af0
+index 0000000..6de2c57
 --- /dev/null
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.h
-@@ -0,0 +1,86 @@
+@@ -0,0 +1,93 @@
 +/*********************************************************
 + * Copyright (C) 2026 GoProSlowYo
 + *
@@ -1088,6 +1197,13 @@ index 0000000..8bd1af0
 +gboolean WaylandDrag_Init(void);
 +void WaylandDrag_Exit(void);
 +gboolean WaylandDrag_IsAvailable(void);
++
++/*
++ * The size of the only output in pixels, for the uinput pointer's range.
++ * Returns FALSE when there is no connection, no mode yet, or more than one
++ * output.
++ */
++gboolean WaylandDrag_GetOutputSize(int *width, int *height);
 +
 +/*
 + * Offer these formats and map the overlays, so that the next pointer press

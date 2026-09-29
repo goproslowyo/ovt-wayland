@@ -146,7 +146,7 @@ index 2937cee..85b155c 100644
        FakeMouse_Click(false);
        mHGButtonDown = false;
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.c b/services/plugins/dndcp/waylandDrag/waylandDrag.c
-index 8f1c3f7..285df99 100644
+index f4f4903..993773d 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDrag.c
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.c
 @@ -72,10 +72,10 @@
@@ -184,16 +184,16 @@ index 8f1c3f7..285df99 100644
  typedef struct {
     char *mimeType;
     void *data;
-@@ -108,6 +121,8 @@ typedef struct {
-    struct wl_buffer *buffer;
-    int width;
-    int height;
+@@ -112,6 +125,8 @@ typedef struct {
+    int modeWidth;
+    int modeHeight;
+    int32_t transform;
 +   /* A shield from WaylandDrag_Refocus(), mapped even while gDrag.hidden. */
 +   gboolean shield;
  } DragOverlay;
  
  static struct {
-@@ -123,9 +138,19 @@ static struct {
+@@ -127,9 +142,19 @@ static struct {
  
     DragOverlay overlays[WAYLAND_DRAG_MAX_OUTPUTS];
     size_t nOverlays;
@@ -213,7 +213,7 @@ index 8f1c3f7..285df99 100644
  
     /*
      * The surface the pointer is over. A press can come only from that
-@@ -667,9 +692,10 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
+@@ -671,9 +696,10 @@ OfferDestroy(struct wl_data_offer *offer)   // IN/OPT
   *    The compositor must stop offering the drag to the overlay as soon as
   *    HideOverlays() runs. These data device events are the only way to see
   *    that, because the rest of this module sees only the source's side of
@@ -227,7 +227,7 @@ index 8f1c3f7..285df99 100644
   *
   *-----------------------------------------------------------------------------
   */
-@@ -698,6 +724,7 @@ DeviceEnter(void *d,                     // IN: unused
+@@ -702,6 +728,7 @@ DeviceEnter(void *d,                     // IN: unused
              struct wl_data_offer *o)     // IN: unused
  {
     DragIsReal();
@@ -235,7 +235,7 @@ index 8f1c3f7..285df99 100644
     g_debug("%s: the overlay was offered the drag\n", __FUNCTION__);
  }
  
-@@ -706,6 +733,7 @@ DeviceLeave(void *d,                    // IN: unused
+@@ -710,6 +737,7 @@ DeviceLeave(void *d,                    // IN: unused
              struct wl_data_device *dd)  // IN: unused
  {
     g_debug("%s: the drag left the overlay\n", __FUNCTION__);
@@ -243,7 +243,7 @@ index 8f1c3f7..285df99 100644
     OfferDestroy(gDrag.offer);
     gDrag.offer = NULL;
  }
-@@ -846,9 +874,10 @@ MakeOverlay(DragOverlay *o)   // IN/OUT: output set, the rest empty
+@@ -850,9 +878,10 @@ MakeOverlay(DragOverlay *o)   // IN/OUT: output set, the rest empty
  /*
   *-----------------------------------------------------------------------------
   *
@@ -256,7 +256,7 @@ index 8f1c3f7..285df99 100644
   *
   *-----------------------------------------------------------------------------
   */
-@@ -870,12 +899,26 @@ DestroyOverlay(DragOverlay *o)   // IN/OUT
+@@ -874,12 +903,26 @@ DestroyOverlay(DragOverlay *o)   // IN/OUT
     }
  }
  
@@ -284,7 +284,7 @@ index 8f1c3f7..285df99 100644
   *
   *-----------------------------------------------------------------------------
   */
-@@ -888,9 +931,11 @@ Unmap(void)
+@@ -892,9 +935,11 @@ Unmap(void)
     for (i = 0; i < gDrag.nOverlays; i++) {
        DestroyOverlay(&gDrag.overlays[i]);
     }
@@ -296,7 +296,7 @@ index 8f1c3f7..285df99 100644
     if (gDrag.display != NULL) {
        wl_display_flush(gDrag.display);
     }
-@@ -1025,6 +1070,12 @@ PointerButton(void *data,                 // IN: unused
+@@ -1029,6 +1074,12 @@ PointerButton(void *data,                 // IN: unused
                                   WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
     }
  
@@ -309,7 +309,7 @@ index 8f1c3f7..285df99 100644
     gDrag.sendBudgetUs = WAYLAND_DRAG_SEND_BUDGET_US;
  
     /* No drag icon. The host draws one on its side of the window. */
-@@ -1226,7 +1277,7 @@ LayerSurfaceConfigure(void *data,                             // IN: DragOverlay
+@@ -1230,7 +1281,7 @@ LayerSurfaceConfigure(void *data,                             // IN: DragOverlay
      * put the overlay back over the cursor in the middle of the drag, undoing
      * what HideOverlays() just did.
      */
@@ -318,7 +318,7 @@ index 8f1c3f7..285df99 100644
        g_debug("%s: configure %ux%u while hidden, staying unmapped\n",
                __FUNCTION__, width, height);
        return;
-@@ -1253,6 +1304,7 @@ LayerSurfaceConfigure(void *data,                             // IN: DragOverlay
+@@ -1257,6 +1308,7 @@ LayerSurfaceConfigure(void *data,                             // IN: DragOverlay
     wl_surface_damage(o->surface, 0, 0, o->width, o->height);
     wl_surface_commit(o->surface);
     gDrag.mapped = TRUE;
@@ -326,7 +326,7 @@ index 8f1c3f7..285df99 100644
  }
  
  
-@@ -1337,6 +1389,8 @@ RegistryGlobalRemove(void *data,                   // IN: unused
+@@ -1397,6 +1449,8 @@ RegistryGlobalRemove(void *data,                   // IN: unused
        if (o->output == NULL || o->name != name) {
           continue;
        }
@@ -335,7 +335,7 @@ index 8f1c3f7..285df99 100644
        if (o->layer != NULL) {
           zwlr_layer_surface_v1_destroy(o->layer);
        }
-@@ -1829,6 +1883,89 @@ lost:
+@@ -1938,6 +1992,89 @@ lost:
  }
  
  
@@ -425,7 +425,7 @@ index 8f1c3f7..285df99 100644
  /*
   *-----------------------------------------------------------------------------
   *
-@@ -1861,6 +1998,127 @@ WaylandDrag_Pump(void)
+@@ -1970,6 +2107,127 @@ WaylandDrag_Pump(void)
  }
  
  
@@ -554,10 +554,10 @@ index 8f1c3f7..285df99 100644
   *-----------------------------------------------------------------------------
   *
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDrag.h b/services/plugins/dndcp/waylandDrag/waylandDrag.h
-index a81263f..455a90d 100644
+index 8ae5d0b..7c158d9 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDrag.h
 +++ b/services/plugins/dndcp/waylandDrag/waylandDrag.h
-@@ -95,6 +95,24 @@ gboolean WaylandDrag_StartOnPress(unsigned int timeoutMs,
+@@ -102,6 +102,24 @@ gboolean WaylandDrag_StartOnPress(unsigned int timeoutMs,
  /* Handle what the compositor has sent so far, without waiting. */
  void WaylandDrag_Pump(void);
  
@@ -583,10 +583,10 @@ index a81263f..455a90d 100644
  void WaylandDrag_Disarm(void);
  
 diff --git a/services/plugins/dndcp/waylandDrag/waylandDragStub.c b/services/plugins/dndcp/waylandDrag/waylandDragStub.c
-index b7a9b26..090c916 100644
+index 59025bb..200e0dc 100644
 --- a/services/plugins/dndcp/waylandDrag/waylandDragStub.c
 +++ b/services/plugins/dndcp/waylandDrag/waylandDragStub.c
-@@ -69,6 +69,22 @@ WaylandDrag_Pump(void)
+@@ -77,6 +77,22 @@ WaylandDrag_Pump(void)
  }
  
  

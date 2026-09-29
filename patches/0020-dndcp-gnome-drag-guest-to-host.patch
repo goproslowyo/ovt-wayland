@@ -261,10 +261,10 @@ index f08ea94..a61ba66 100644
        g_debug("%s: hide\n", __FUNCTION__);
        mDetWnd->UpdateDetWnd(show, x, y);
 diff --git a/services/plugins/dndcp/dragDetWndX11GTK4.cpp b/services/plugins/dndcp/dragDetWndX11GTK4.cpp
-index 9a06952..19dd073 100644
+index 9108847..abab327 100644
 --- a/services/plugins/dndcp/dragDetWndX11GTK4.cpp
 +++ b/services/plugins/dndcp/dragDetWndX11GTK4.cpp
-@@ -39,6 +39,10 @@ extern "C" {
+@@ -40,6 +40,10 @@ extern "C" {
  #include <string.h>
  }
  
@@ -275,7 +275,7 @@ index 9a06952..19dd073 100644
  /* How long UpdateDetWnd() waits for the window manager to adopt the window. */
  #define DET_WND_MANAGE_TIMEOUT_MS 500
  
-@@ -89,12 +93,21 @@ DragDetWnd::DragDetWnd(int useUInput_fd)
+@@ -90,12 +94,21 @@ DragDetWnd::DragDetWnd(int useUInput_fd)
       mUnderWayland(DetWndUnderWayland()),
       mWarpXPointer(true),
       mAbove(false),
@@ -298,7 +298,7 @@ index 9a06952..19dd073 100644
     std::vector<GType> types;
     mWnd = new Gtk::Window();
     if (!mWnd) {
-@@ -163,6 +176,12 @@ DragDetWnd::DragDetWnd(int useUInput_fd)
+@@ -164,6 +177,12 @@ DragDetWnd::DragDetWnd(int useUInput_fd)
      */
     mTarget->set_preload(false);
  
@@ -311,7 +311,7 @@ index 9a06952..19dd073 100644
  /* Need to check USE_UINPUT, as FreeBSD does not support this */
  #ifdef USE_UINPUT
     // Uinput simulation for wayland backend.
-@@ -207,6 +226,13 @@ fail:
+@@ -208,6 +227,13 @@ fail:
  
  DragDetWnd::~DragDetWnd()
  {
@@ -325,7 +325,7 @@ index 9a06952..19dd073 100644
  #ifdef USE_UINPUT
     if (mUseUInput) {
        FakeMouse_Destory();
-@@ -835,7 +861,8 @@ DetWndIsManaged(Display *display,  // IN
+@@ -848,7 +874,8 @@ DetWndIsManaged(Display *display,  // IN
   *    the pointer moves. In a guest to host drag the first motion is the move
   *    that UpdateDetWnd() makes through SimulateXEvents() after this returns,
   *    and on KWin a move before the window is ready loses the drag for its
@@ -335,7 +335,7 @@ index 9a06952..19dd073 100644
   *
   * Results:
   *    True if the window is managed, false if timeoutMs passed first.
-@@ -1488,12 +1515,16 @@ DragDetWnd::GetGeometry(int &x, int &y, int &width, int &height)
+@@ -1501,12 +1528,16 @@ DragDetWnd::GetGeometry(int &x, int &y, int &width, int &height)
   */
  
  void
@@ -353,7 +353,7 @@ index 9a06952..19dd073 100644
     /* If the window is being shown, move it to the right place. */
     if (show) {
        /* Before the map as well, so that the map itself uses the position. */
-@@ -1516,9 +1547,38 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
+@@ -1529,9 +1560,38 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
         * the drag source, and the delay there loses the drop target, so the
         * drag ends in GDK_DRAG_CANCEL_NO_TARGET.
         */
@@ -392,7 +392,7 @@ index 9a06952..19dd073 100644
        }
        g_debug("%s: show at (%d, %d, %d, %d)\n", __FUNCTION__, x, y, DRAG_DET_WINDOW_WIDTH * 2, DRAG_DET_WINDOW_WIDTH * 2);
        /*
-@@ -1533,9 +1593,16 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
+@@ -1546,9 +1606,16 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
         * the target does not get re-entered before the release arrives.
         */
        if (asDropTarget) {
@@ -410,7 +410,7 @@ index 9a06952..19dd073 100644
     } else {
        g_debug("%s: hide\n", __FUNCTION__);
        Hide();
-@@ -1544,6 +1611,130 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
+@@ -1557,6 +1624,130 @@ DragDetWnd::UpdateDetWnd(bool show, int32 x, int32 y, bool asDropTarget)
  }
  
  

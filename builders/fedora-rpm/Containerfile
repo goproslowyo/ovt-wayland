@@ -206,11 +206,13 @@ RUN set -eux; \
     strings "$so" | grep -q 'native drag source ready'; \
     strings "$so" | grep -q 'drag started from serial'; \
     strings "$so" | grep -q 'formats natively'; \
+    strings "$so" | grep -q 'from the %s, was'; \
     strings "$so" | grep -q 'placeholders under'; \
     strings "$so" | grep -q 'never agreed'; \
     strings "$so" | grep -q 'Mutter bridges XDND'; \
     strings "$so" | grep -q 'outlived the drop'; \
     strings "$so" | grep -q 'native drop target shown on'; \
+    strings "$so" | grep -q 'onto the native drop target'; \
     strings "$so" | grep -q 'PruneStagingDirectories'; \
     grep -qx 'Type=fuse3' './usr/lib/systemd/system/run-vmblock\x2dfuse.mount'; \
     echo "patched dndcp verified"

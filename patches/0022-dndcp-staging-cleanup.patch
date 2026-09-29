@@ -940,7 +940,7 @@ index da54ee5..7cc95b5 100644
        if (mkdtemp(realStagingDir) != NULL) {
           char *randomPart = strrchr(realStagingDir, '/') + 1;
 diff --git a/services/plugins/dndcp/dndUIX11GTK4.cpp b/services/plugins/dndcp/dndUIX11GTK4.cpp
-index 8307284..89423bf 100644
+index 7e15981..75926df 100644
 --- a/services/plugins/dndcp/dndUIX11GTK4.cpp
 +++ b/services/plugins/dndcp/dndUIX11GTK4.cpp
 @@ -1412,6 +1412,10 @@ DnDUIX11::OnSrcDragBegin(const CPClipboard *clip,       // IN
@@ -954,7 +954,7 @@ index 8307284..89423bf 100644
  
        /* Provide path within vmblock file system instead of actual path. */
        stagingDirName = GetLastDirName(mHGStagingDir);
-@@ -2669,6 +2673,10 @@ DnDUIX11::OnGetFilesDone(bool success)  // IN: true if transfer succeeded
+@@ -2711,6 +2715,10 @@ DnDUIX11::OnGetFilesDone(bool success)  // IN: true if transfer succeeded
      */
  
     mHGGetFileStatus = DND_FILE_TRANSFER_FINISHED;
