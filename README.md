@@ -225,14 +225,12 @@ sway needs the native path.
   drop target. Sway floats it on its own. Elsewhere, float it in the
   compositor's configuration, for example in sway syntax
   `for_window [title="vmware-user"] floating enable`.
-- On niri, vmusr can start at login before niri's X server is ready, and
-  exits with `Failed to open display`. Log out and in again, or start
-  `vmware-user-suid-wrapper` by hand.
-- On niri, turn off scrolling at the screen edges during a drag, with
-  `gestures { dnd-edge-view-scroll { trigger-width 0; }; }`. The guest pointer
-  stays at the edge a guest to host drag left from, and niri scrolls the view
-  until the drop. With the scrolling on, the host sometimes treated the drag
-  as back in the guest and kept the pointer in the VM window.
+- The host sends its clipboard a moment after the VM gets focus, so an
+  instant paste can get the previous clip.
+- COSMIC Files can paste a stale clipboard. Reopen the window.
+- On niri, vmusr can start before X is ready and exit. Log in again.
+- On niri, set `gestures { dnd-edge-view-scroll { trigger-width 0; }; }`.
+  Its edge scrolling can stop guest to host drags.
 
 ## Patches
 

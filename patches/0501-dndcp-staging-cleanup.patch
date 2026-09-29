@@ -122,10 +122,10 @@ index 31bb391..aedc31e 100644
     delete m_dndUI;
  #if defined(GTK3)
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index c56494f..601b3ba 100644
+index d467fe8..dd13a38 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
-@@ -999,6 +999,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -1044,6 +1044,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
        mLastHostClip = current;
     }
  
@@ -140,7 +140,7 @@ index c56494f..601b3ba 100644
     /*
      * The host clipboard has changed, whether or not the clip can be
      * installed here. Forget the earlier clips, so that a later guest copy
-@@ -2451,6 +2459,10 @@ CopyPasteUIWayland::SetRemoteFileList(const CPClipboard *clip)  // IN
+@@ -2496,6 +2504,10 @@ CopyPasteUIWayland::SetRemoteFileList(const CPClipboard *clip)  // IN
     }
     mHGStagingDir = stagingDir;
     free(stagingDir);
@@ -151,7 +151,7 @@ index c56494f..601b3ba 100644
  
     mBlockAdded = mBlockCtrl->AddBlock(mBlockCtrl->fd, mHGStagingDir.c_str());
     if (!mBlockAdded) {
-@@ -2626,6 +2638,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2671,6 +2683,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
         * Ask for the staging dir to be deleted on next reboot, as the X11
         * backends do. On POSIX, File_UnlinkDelayed() unlinks at once and
         * fails on a directory, so this removes nothing.
@@ -161,7 +161,7 @@ index c56494f..601b3ba 100644
         */
        DnD_DeleteStagingFiles(mHGStagingDir.c_str(), TRUE);
     } else {
-@@ -2641,6 +2656,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2686,6 +2701,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
   *
   *    Send the guest selection read into mClipboard to the host.
   *
@@ -171,7 +171,7 @@ index c56494f..601b3ba 100644
   * Results:
   *    None.
   *
-@@ -2653,6 +2671,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
+@@ -2698,6 +2716,9 @@ CopyPasteUIWayland::GetLocalFilesDone(bool success)  // IN
  void
  CopyPasteUIWayland::SendLocalClip(void)
  {

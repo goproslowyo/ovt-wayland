@@ -56,6 +56,13 @@ LocalPrepareFileContents() writes them to a staging directory, and the
 paths are published the same way without vmblock, since the data has
 already arrived. The backend now advertises every copy and paste format.
 
+The host sends its clipboard again each time the guest gets the focus.
+A host file clip stays on the selection while its files can still be
+pasted. Installing it again would stage the files anew and remove the
+ones a paste in progress is reading. Once a transfer has failed, or the
+staged files are gone, the next copy of the same files is installed
+afresh.
+
 Tested by hand with the whole series on Bazzite 44 (Fedora 44), against
 VMware Workstation Pro 26H1u1, build 26.0.1.25688693, on Windows 10 Pro
 22H2. On KDE Plasma 6.7.5 text, PNG, RTF and files went both ways. On
@@ -65,10 +72,10 @@ went both ways, and a host image arrived as a file, through the X
 selection in both directions. Only the GTK4 configuration was built.
 ---
  .../plugins/dndcp/copyPasteDnDWayland.cpp     |   40 +-
- services/plugins/dndcp/copyPasteUIWayland.cpp | 1313 ++++++++++++++++-
- services/plugins/dndcp/copyPasteUIWayland.h   |   75 +-
+ services/plugins/dndcp/copyPasteUIWayland.cpp | 1358 ++++++++++++++++-
+ services/plugins/dndcp/copyPasteUIWayland.h   |   76 +-
  .../dndcp/dndGuestBase/copyPasteDnDWayland.h  |    4 +
- 4 files changed, 1417 insertions(+), 15 deletions(-)
+ 4 files changed, 1463 insertions(+), 15 deletions(-)
 
 diff --git a/services/plugins/dndcp/copyPasteDnDWayland.cpp b/services/plugins/dndcp/copyPasteDnDWayland.cpp
 index ea41d2c..4586367 100644
@@ -176,7 +183,7 @@ index ea41d2c..4586367 100644
            DND_CP_CAP_BIG_BUFFER;
  }
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.cpp b/services/plugins/dndcp/copyPasteUIWayland.cpp
-index 8de8720..c56494f 100644
+index 8de8720..d467fe8 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.cpp
 +++ b/services/plugins/dndcp/copyPasteUIWayland.cpp
 @@ -37,28 +37,42 @@
@@ -341,15 +348,68 @@ index 8de8720..c56494f 100644
     mInited = true;
     return true;
  }
-@@ -861,6 +946,7 @@ CopyPasteUIWayland::ClearLastClipboard(void)
+@@ -861,6 +946,46 @@ CopyPasteUIWayland::ClearLastClipboard(void)
     mLastClipboardText.clear();
     mLastClipboardImage.clear();
     mLastClipboardRtf.clear();
 +   mLastClipboardFiles.clear();
++}
++
++
++/*
++ *-----------------------------------------------------------------------------
++ *
++ * CopyPasteUIWayland::LocalFileOfferIsLive --
++ *
++ *    Whether the files of the host clip on the selection can still be
++ *    pasted. A file list stays pasteable while its staging directory exists.
++ *    GetLocalFilesDone() forgets the directory when a transfer fails. File
++ *    contents stay pasteable while the files written out for them exist.
++ *    Those are plain files, so checking them does not wait on vmblock.
++ *
++ * Results:
++ *    true for a clip without files.
++ *
++ *-----------------------------------------------------------------------------
++ */
++
++bool
++CopyPasteUIWayland::LocalFileOfferIsLive(const CPClipboard *clip)  // IN
++{
++   if (CPClipboard_ItemExists(clip, CPFORMAT_FILELIST)) {
++      return !mHGStagingDir.empty() &&
++             g_file_test(mHGStagingDir.c_str(), G_FILE_TEST_IS_DIR);
++   }
++   if (CPClipboard_ItemExists(clip, CPFORMAT_FILECONTENTS)) {
++      if (mLastClipboardFiles.empty()) {
++         return false;
++      }
++      for (size_t i = 0; i < mLastClipboardFiles.size(); i++) {
++         if (!g_file_test(mLastClipboardFiles[i].c_str(),
++                          G_FILE_TEST_EXISTS)) {
++            return false;
++         }
++      }
++   }
++   return true;
  }
  
  
-@@ -922,6 +1008,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -903,7 +1028,13 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+                         DynBuf_GetSize(&serialized));
+       }
+       DynBuf_Destroy(&serialized);
++      /*
++       * A clip with files is kept only while its files can still be pasted.
++       * Installing it again stages them anew, and that removes the files a
++       * paste in progress may still be reading.
++       */
+       if (!current.empty() && current == mLastHostClip &&
++          LocalFileOfferIsLive(clip) &&
+           (WaylandClipboard_IsOwner() ||
+            CopyPasteXWriterIsOwner(XWriterClipboard()))) {
+          g_debug("%s: the guest still offers this host clip; leaving it\n",
+@@ -922,6 +1053,14 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
      */
     ClearLastClipboard();
  
@@ -364,7 +424,7 @@ index 8de8720..c56494f 100644
     /*
      * Log every format the host offered. The host may attach a text rendering,
      * such as a filename or URL, to an image copy, so the order in which the
-@@ -933,6 +1027,27 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
+@@ -933,6 +1072,27 @@ CopyPasteUIWayland::GetRemoteClipboardCB(const CPClipboard *clip)  // IN
             CPClipboard_ItemExists(clip, CPFORMAT_RTF)      ? " rtf"   : "",
             CPClipboard_ItemExists(clip, CPFORMAT_FILELIST) ? " files" : "");
  
@@ -392,7 +452,7 @@ index 8de8720..c56494f 100644
     /*
      * Offer every format the host sent in one selection, so an application
      * asking for rich text gets RTF while one asking for plain text gets the
-@@ -1117,8 +1232,8 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
+@@ -1117,8 +1277,8 @@ CopyPasteUIWayland::GetSelectionGeneration(guint64 *generation)  // OUT
   *
   * CopyPasteUIWayland::GetLocalClipboard --
   *
@@ -403,7 +463,7 @@ index 8de8720..c56494f 100644
   *    When copy and paste is allowed, every request gets one reply, with an
   *    empty or not-changed clip when there is nothing new, so that the host
   *    request does not hang.
-@@ -1153,7 +1268,9 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -1153,7 +1313,9 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     /*
      * When this client owns the selection, the selection holds what the host
      * sent, so there is nothing new to report. Reading it back would send the
@@ -414,7 +474,7 @@ index 8de8720..c56494f 100644
      * fallback this process owns the X selection after
      * CopyPasteXWriterOffer(). GDK answers a read of it from this main loop,
      * which the read holds, so the read would also wait out the budget.
-@@ -1187,7 +1304,29 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -1187,7 +1349,29 @@ CopyPasteUIWayland::GetLocalClipboard(void)
     CPClipboard_Clear(&mClipboard);
  
     /*
@@ -445,7 +505,7 @@ index 8de8720..c56494f 100644
      * advertises a text/plain rendering, such as a filename or a URL, and
      * reading the text would lose the image.
      */
-@@ -1335,6 +1474,1166 @@ CopyPasteUIWayland::GetLocalClipboard(void)
+@@ -1335,6 +1519,1166 @@ CopyPasteUIWayland::GetLocalClipboard(void)
  }
  
  
@@ -1613,7 +1673,7 @@ index 8de8720..c56494f 100644
   *-----------------------------------------------------------------------------
   *
 diff --git a/services/plugins/dndcp/copyPasteUIWayland.h b/services/plugins/dndcp/copyPasteUIWayland.h
-index 9b42842..d3dcb54 100644
+index 9b42842..6a2cca2 100644
 --- a/services/plugins/dndcp/copyPasteUIWayland.h
 +++ b/services/plugins/dndcp/copyPasteUIWayland.h
 @@ -27,7 +27,7 @@
@@ -1685,7 +1745,7 @@ index 9b42842..d3dcb54 100644
     /* Called when the host sends new clipboard contents. */
     void GetRemoteClipboardCB(const CPClipboard *clip);
     /* Called when the host asks for the guest clipboard. */
-@@ -69,6 +107,28 @@ private:
+@@ -69,6 +107,29 @@ private:
     void SendLocalClip(void);
     /* Forget the formats recorded in mLastClipboard*. */
     void ClearLastClipboard(void);
@@ -1694,6 +1754,7 @@ index 9b42842..d3dcb54 100644
 +   bool SetRemoteFileList(const CPClipboard *clip);
 +   void RemoveHGBlock(void);
 +   bool SetRemoteFileContents(const CPClipboard *clip);
++   bool LocalFileOfferIsLive(const CPClipboard *clip);
 +
 +   /*
 +    * Outcome of a guest -> host file list attempt. The caller has to be able
@@ -1714,7 +1775,7 @@ index 9b42842..d3dcb54 100644
  
     GuestCopyPasteMgr *mCP;
     CPClipboard mClipboard;
-@@ -77,6 +137,8 @@ private:
+@@ -77,6 +138,8 @@ private:
     std::string mLastClipboardRtf;
     /* The last host clip, serialized, to tell a repeat from a new one. */
     std::string mLastHostClip;
@@ -1723,7 +1784,7 @@ index 9b42842..d3dcb54 100644
     bool mInited;
  
     /*
-@@ -101,6 +163,17 @@ private:
+@@ -101,6 +164,17 @@ private:
     guint64 mReadGeneration;
     /* The generation last read again after its reads ran out of time. */
     guint64 mRetriedGeneration;
