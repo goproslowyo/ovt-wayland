@@ -178,6 +178,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+      # For the build provenance attestation.
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -316,6 +319,19 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
         run: cosign verify --key cosign.pub "$IMAGE@$DIGEST"
 
+      # A SLSA build provenance attestation, signed through Sigstore with this
+      # workflow's GitHub identity, and stored next to the image. It names the
+      # repository, commit and workflow run that built this digest, and
+      # `gh attestation verify oci://IMAGE -R OWNER/REPO` checks it. The cosign
+      # signature above stays the one bootc enforces.
+      - name: Attest
+        if: github.ref == 'refs/heads/main'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
   # Publishes the packages the build jobs uploaded as one GitHub release, tagged
   # v<version>-<date>. It takes every artifact named pkg-*, so a new package
   # builder only has to upload its files under that prefix and be added to
@@ -334,6 +350,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       # One directory per artifact, so two builders that produce the same
       # file name fail the check below instead of overwriting each other.
@@ -366,7 +384,16 @@ jobs:
             test ! -e "assets/$n" || { echo "duplicate asset $n" >&2; exit 1; }
             mv "$f" "assets/$n"
           done
+          (cd assets && sha256sum -- * > ../SHA256SUMS)
+          mv SHA256SUMS assets/
           ls -l assets
+
+      # Every release file, SHA256SUMS included, gets a build provenance
+      # attestation. `gh attestation verify FILE -R OWNER/REPO` checks it.
+      - name: Attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: assets/*
 
       - name: Create or update the release
         env:
@@ -385,8 +412,6 @@ jobs:
           }
           day="$(date -u +%Y%m%d)"
           tag="v$ver-$day"
-          sha256sum -- * > ../SHA256SUMS
-          mv ../SHA256SUMS .
           {
             echo "open-vm-tools $ver with the Wayland patches. Built from"
             echo "$GITHUB_SHA."

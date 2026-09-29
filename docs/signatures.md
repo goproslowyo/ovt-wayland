@@ -42,3 +42,21 @@ The `ostree-image-signed:docker://` form is for `rpm-ostree rebase`.
 
 To sign a fork's images with your own key, see
 [Building](building.md#signing-in-a-fork).
+
+## Build attestations
+
+CI also attaches a SLSA build provenance attestation to each image and to
+every release file, `SHA256SUMS` included. It is signed through Sigstore with
+the workflow's GitHub identity, so there is no key to manage, and it names the
+repository, commit and workflow run that built the file. Check a download or
+an image with the GitHub CLI:
+
+```bash
+gh attestation verify open-vm-tools-desktop-13.1.0-100.fc44.clipway.x86_64.rpm \
+  -R goproslowyo/ovt-wayland
+gh attestation verify oci://ghcr.io/goproslowyo/bazzite-ovt:latest \
+  -R goproslowyo/ovt-wayland
+```
+
+The cosign signature stays the one bootc enforces. The attestation is the only
+signature the packages carry.
